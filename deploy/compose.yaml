@@ -1,3 +1,5 @@
+name: ride-maker
+
 services:
   web:
     build:
@@ -33,6 +35,7 @@ services:
       args:
         PB_VERSION: 0.40.4
     restart: unless-stopped
+    command: ["/pb/pocketbase", "serve", "--http=0.0.0.0:8080", "--automigrate=0"]
     ports:
       - "127.0.0.1:8091:8080"
     volumes:

@@ -24,7 +24,9 @@ npm run build
 `deploy/compose.yaml` builds the static web app and PocketBase. The web server
 serves only the app and the PocketBase endpoints it needs; the PocketBase admin
 UI is not exposed through it. PocketBase's host port is loopback-only for an
-SSH tunnel. Runtime data lives at
+SSH tunnel. Production disables automatic migration generation; committed
+migrations still apply, while Dashboard settings remain in the database.
+Runtime data lives at
 `/home/henry/docker-data/ride-maker/pocketbase` and is covered by Nauvis's
 server-state backup.
 
