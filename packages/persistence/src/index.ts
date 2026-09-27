@@ -13,6 +13,7 @@ export type SavedRoute = {
 export interface RouteRepository {
   createUnlisted(document: RouteDocument): Promise<SavedRoute>;
   get(id: string): Promise<SavedRoute>;
+  listPublic(): Promise<SavedRoute[]>;
 }
 
 type PocketBaseRecord = {
@@ -48,6 +49,16 @@ export class PocketBaseRouteRepository implements RouteRepository {
   async get(id: string): Promise<SavedRoute> {
     if (!/^[a-z0-9]{15}$/u.test(id)) throw new Error("Invalid shared route link.");
     return this.request(`/collections/routes/records/${id}`);
+  }
+
+  async listPublic(): Promise<SavedRoute[]> {
+    const response = await fetch(`${this.apiBaseUrl}/collections/routes/records?filter=visibility%3D%22public%22&sort=-created&perPage=50`);
+    const data = (await response.json()) as { items?: PocketBaseRecord[]; message?: string };
+    if (!response.ok) {
+      throw new Error(typeof data.message === "string" ? data.message : `Route request failed (${response.status}).`);
+    }
+    if (!Array.isArray(data.items)) throw new Error("The route list has an unsupported format.");
+    return data.items.map(parseSavedRoute);
   }
 
   private async request(path: string, init?: RequestInit): Promise<SavedRoute> {

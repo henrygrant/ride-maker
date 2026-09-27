@@ -1,0 +1,32 @@
+{
+  "name": "@ride-maker/mobile",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "dev": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build": "tsc --noEmit",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@maplibre/maplibre-react-native": "11.4.0",
+    "@ride-maker/domain": "*",
+    "@ride-maker/persistence": "*",
+    "expo": "57.0.25",
+    "expo-dev-client": "~57.0.19",
+    "expo-linking": "~57.0.11",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
+  },
+  "devDependencies": {
+    "@types/geojson": "^7946.0.16",
+    "@types/react": "~19.2.4",
+    "typescript": "~6.0.3",
+    "vitest": "5.0.2"
+  }
+}

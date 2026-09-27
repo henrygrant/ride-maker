@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Ride Maker",
+    "slug": "ride-maker",
+    "scheme": "ridemaker",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "net.thg3.ridemaker"
+    },
+    "android": {
+      "package": "net.thg3.ridemaker"
+    },
+    "plugins": ["@maplibre/maplibre-react-native"]
+  }
+}

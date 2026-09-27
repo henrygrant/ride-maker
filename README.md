@@ -1,14 +1,35 @@
 # Ride Maker
 
-Plan bicycle routes on the web and ride them with a native mobile app.
+Plan bicycle routes on the web and view them in a native mobile app.
 
 ## Workspaces
 
 - `apps/web` — Vite web planner
+- `apps/mobile` — Expo/React Native route viewer
 - `packages/ui` — shared React Strict DOM components and design tokens
+- `packages/domain` and `packages/persistence` — shared route format and PocketBase access
 
-The mobile app will be added as a separate Expo workspace when the shared web
-foundation is established.
+The mobile app is a viewer for now: it can list public routes or open any
+unlisted route by pasting its Ride Maker link or route ID. It does not edit
+routes, use location, or provide navigation. Since routes finished on the web
+are currently saved as **unlisted**, the public list may be empty; use a link
+to open one.
+
+## Mobile development
+
+MapLibre is a native module, so the mobile app needs an Expo development build;
+it will not run in Expo Go. With Android tooling installed, run:
+
+```sh
+npm install
+npm run android --workspace @ride-maker/mobile
+npm run dev --workspace @ride-maker/mobile
+```
+
+On macOS with Xcode, use `npm run ios --workspace @ride-maker/mobile` instead.
+The viewer reads routes from `https://ridemaker.thg3.net/api`. A custom URL such
+as `ridemaker://route/ROUTE_ID` also opens a route. Web links currently need to
+be pasted into the app; universal/app links are not configured yet.
 
 ## Commands
 
