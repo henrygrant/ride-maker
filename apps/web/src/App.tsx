@@ -4,7 +4,8 @@ import {
   type Coordinate,
   type RouteDocument,
 } from "@ride-maker/domain";
-import { parseGpx, serializeGpx } from "@ride-maker/gpx";
+import { serializeGpx } from "@ride-maker/gpx";
+import { PhotonGeocodingProvider, type GeocodingResult } from "@ride-maker/geocoding";
 import { ValhallaRoutingProvider } from "@ride-maker/routing";
 import { Button } from "@ride-maker/ui";
 // RSD/StyleX currently requires a direct source import for cross-workspace themes.
@@ -12,8 +13,12 @@ import { tokens } from "../../../packages/ui/src/tokens.css";
 import { useEffect, useState, type ChangeEvent } from "react";
 import { css, html } from "react-strict-dom";
 import { RouteMap } from "./RouteMap";
+import { PlaceSearchInput } from "./PlaceSearchInput";
+import { AuthPanel } from "./AuthPanel";
+import { pocketBase, routeRepository } from "./backend";
 
 const routingProvider = new ValhallaRoutingProvider();
+const geocodingProvider = new PhotonGeocodingProvider();
 
 const styles = css.create({
   app: {
@@ -164,28 +169,53 @@ const styles = css.create({
 
 export function App() {
   const [document, setDocument] = useState<RouteDocument | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
   const [isPlanning, setIsPlanning] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [account, setAccount] = useState(pocketBase.authStore.record);
   const [routingState, setRoutingState] = useState<
     { status: "idle" | "routing" } | { status: "error"; message: string }
   >({ status: "idle" });
-  const routingKey = document?.controlPoints
-    .map((point) => `${point.id}:${point.latitude}:${point.longitude}`).join("|") ?? "";
+  const [sharingState, setSharingState] = useState<
+    | { status: "idle" | "saving" | "loading" }
+    | { status: "saved"; url: string }
+    | { status: "error"; message: string }
+  >({ status: "idle" });
+  const routingKey = document === null ? "" : controlPointKey(document.controlPoints);
+
+  useEffect(() => pocketBase.authStore.onChange(() => setAccount(pocketBase.authStore.record), true), []);
 
   useEffect(() => {
-    if (document?.source.kind !== "new" || document.controlPoints.length < 2) {
+    const routeId = new URL(window.location.href).searchParams.get("route");
+    if (routeId === null) return;
+    setSharingState({ status: "loading" });
+    void routeRepository.get(routeId)
+      .then((savedRoute) => {
+        setDocument(savedRoute.document);
+        setIsPlanning(false);
+        setSharingState({ status: "saved", url: window.location.href });
+      })
+      .catch((error: unknown) => {
+        setSharingState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not load the shared route.",
+        });
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!isPlanning || document?.source.kind !== "new" || document.controlPoints.length < 2 || document.routing !== undefined) {
       setRoutingState({ status: "idle" });
       return;
     }
     const controller = new AbortController();
     const controlPoints = document.controlPoints;
-    const pointIds = controlPoints.map((point) => point.id);
     const timeout = window.setTimeout(() => {
       setRoutingState({ status: "routing" });
       void routingProvider.route({ controlPoints, profile: "road", signal: controller.signal })
         .then((route) => {
+          if (controller.signal.aborted) return;
           setDocument((current) => {
-            if (current === null || !sameIds(current.controlPoints, pointIds)) return current;
+            if (current === null || controlPointKey(current.controlPoints) !== routingKey) return current;
             return {
               ...current,
               segments: route.segments.map((points) => ({ id: createId("segment"), points })),
@@ -202,35 +232,7 @@ export function App() {
         });
     }, 250);
     return () => { window.clearTimeout(timeout); controller.abort(); };
-  }, [routingKey, document?.source.kind]);
-
-  const importGpx = () => {
-    const input = window.document.createElement("input");
-    input.type = "file";
-    input.accept = ".gpx,application/gpx+xml";
-    input.addEventListener(
-      "change",
-      () => {
-        const file = input.files?.[0];
-        if (file === undefined) return;
-
-        void file
-          .text()
-          .then((xml) => {
-            setDocument(parseGpx(xml, { filename: file.name }));
-            setIsPlanning(false);
-            setImportError(null);
-          })
-          .catch((error: unknown) => {
-            setImportError(
-              error instanceof Error ? error.message : "Could not import GPX.",
-            );
-          });
-      },
-      { once: true },
-    );
-    input.click();
-  };
+  }, [routingKey, document?.source.kind, document?.routing, isPlanning]);
 
   const exportGpx = () => {
     if (document === null) return;
@@ -247,16 +249,58 @@ export function App() {
   };
 
   const startRoute = () => {
+    clearSharedRouteUrl();
     setDocument(createRouteDocument());
     setIsPlanning(true);
-    setImportError(null);
+    setSharingState({ status: "idle" });
+  };
+
+  const finishRoute = () => {
+    if (document === null || !isPlanning || document.routing === undefined || sharingState.status === "saving") return;
+    if (!pocketBase.authStore.isValid || pocketBase.authStore.record?.collectionName !== "users") {
+      setAuthOpen(true);
+      return;
+    }
+    setIsPlanning(false);
+    setSharingState({ status: "saving" });
+    void routeRepository.createUnlisted(document)
+      .then((savedRoute) => {
+        const url = new URL(window.location.href);
+        url.searchParams.set("route", savedRoute.id);
+        window.history.replaceState(null, "", url);
+        setDocument(savedRoute.document);
+        setIsPlanning(false);
+        setSharingState({ status: "saved", url: url.toString() });
+      })
+      .catch((error: unknown) => {
+        setIsPlanning(true);
+        setSharingState({
+          status: "error",
+          message: error instanceof Error ? error.message : "Could not save the route.",
+        });
+      });
+  };
+
+  const editRoute = () => {
+    if (document === null) return;
+    clearSharedRouteUrl();
+    setDocument({ ...document, id: createId("route") });
+    setSharingState({ status: "idle" });
+    setIsPlanning(true);
   };
 
   const addControlPoint = (coordinate: Coordinate) => {
     if (!isPlanning) return;
+    const pointId = createId("control");
     setDocument((current) =>
-      current === null ? current : appendControlPoint(current, coordinate),
+      current === null ? current : appendControlPoint(current, coordinate, pointId),
     );
+    void geocodingProvider.reverse(coordinate).then((result) => {
+      if (result === null) return;
+      setDocument((current) =>
+        current === null ? current : renameControlPointById(current, pointId, result.name),
+      );
+    }).catch(() => undefined);
   };
 
   const closeLoop = () => {
@@ -264,7 +308,7 @@ export function App() {
     setDocument((current) => {
       const start = current?.controlPoints[0];
       if (current === null || start === undefined) return current;
-      return appendControlPoint(current, start);
+      return appendControlPoint(current, start, createId("control"), start.name);
     });
   };
 
@@ -280,6 +324,12 @@ export function App() {
     setDocument((current) => current === null ? current : renameControlPointById(current, pointId, name));
   };
 
+  const selectPlace = (pointId: string, result: GeocodingResult) => {
+    setDocument((current) =>
+      current === null ? current : moveControlPoint(current, pointId, result),
+    );
+  };
+
   const controlPointCount = document?.controlPoints.length ?? 0;
   const isNewRoute = document?.source.kind === "new";
 
@@ -288,21 +338,39 @@ export function App() {
       <html.header style={styles.header}>
         <html.h1 style={styles.brand}>Ride Maker</html.h1>
         <html.div style={styles.headerActions}>
-          <Button onClick={importGpx} variant="quiet">
-            Import GPX
-          </Button>
-          <Button onClick={exportGpx} variant="quiet">
-            Export GPX
-          </Button>
+          {account?.collectionName === "users" && pocketBase.authStore.isValid ? (
+            <>
+              <html.span style={styles.copy}>{account.email || "Signed in"}</html.span>
+              <Button onClick={() => pocketBase.authStore.clear()} variant="quiet">Sign out</Button>
+            </>
+          ) : (
+            <Button onClick={() => setAuthOpen(true)} variant="quiet">Sign in</Button>
+          )}
+          {document === null || isPlanning || sharingState.status !== "saved" ? null : (
+            <Button
+              onClick={() => { void copyShareUrl(sharingState.url); }}
+              variant="quiet"
+            >
+              Copy link
+            </Button>
+          )}
+          {document !== null && !isPlanning ? (
+            <Button onClick={exportGpx} variant="quiet">
+              Export GPX
+            </Button>
+          ) : null}
         </html.div>
       </html.header>
+      {authOpen ? <AuthPanel onClose={() => setAuthOpen(false)} /> : null}
       <html.main style={styles.workspace}>
         <html.aside style={styles.sidebar}>
           <html.p style={styles.eyebrow}>
             {isPlanning
               ? "Planning route"
-              : document === null || isNewRoute
+              : document === null
                 ? "New route"
+                : isNewRoute
+                  ? "Saved route"
                 : "Imported route"}
           </html.p>
           {planningTitle(document, isPlanning) === null ? null : (
@@ -325,7 +393,7 @@ export function App() {
           )}
           {document === null || (isNewRoute && controlPointCount === 0) ? (
             <html.p style={styles.copy}>
-              Create a route here or import a GPX using the button above.
+              Create a route to get started.
             </html.p>
           ) : isPlanning ? (
             <html.p style={styles.copy}>
@@ -337,17 +405,21 @@ export function App() {
               {formatRouteSummary(document)}
             </html.p>
           )}
-          {importError === null ? null : (
-            <html.p role="alert" style={styles.error}>
-              {importError}
-            </html.p>
-          )}
           {routingState.status === "routing" ? (
             <html.p style={styles.copy}>Finding a bicycle route…</html.p>
           ) : routingState.status === "error" ? (
             <html.p role="alert" style={styles.error}>
               {routingState.message} The route could not be updated.
             </html.p>
+          ) : null}
+          {sharingState.status === "loading" ? (
+            <html.p style={styles.copy}>Loading shared route…</html.p>
+          ) : sharingState.status === "error" ? (
+            <html.p role="alert" style={styles.error}>{sharingState.message}</html.p>
+          ) : sharingState.status === "saving" ? (
+            <html.p style={styles.copy}>Saving route…</html.p>
+          ) : sharingState.status === "saved" ? (
+            <html.p style={styles.copy}>Saved. Anyone with the link can view this route.</html.p>
           ) : null}
           {isNewRoute && controlPointCount > 0 && document !== null ? (
             <html.section aria-label="Route points" style={styles.itinerary}>
@@ -358,12 +430,12 @@ export function App() {
                     <html.span style={styles.pointNumber}>{index + 1}</html.span>
                     <html.div style={styles.pointDetails}>
                       {isPlanning ? (
-                        <html.input
-                          aria-label={`${controlPointLabel(index, controlPointCount)} name`}
-                          onChange={(event: ChangeEvent<HTMLInputElement>) => renameControlPoint(point.id, event.currentTarget.value)}
-                          placeholder={controlPointLabel(index, controlPointCount)}
-                          style={styles.pointNameInput}
-                          type="text"
+                        <PlaceSearchInput
+                          focus={point}
+                          label={controlPointLabel(index, controlPointCount)}
+                          onNameChange={(name) => renameControlPoint(point.id, name)}
+                          onSelect={(result) => selectPlace(point.id, result)}
+                          provider={geocodingProvider}
                           value={point.name ?? ""}
                         />
                       ) : (
@@ -392,12 +464,15 @@ export function App() {
             ) : null}
             {isPlanning ? (
               <>
-                <Button disabled={controlPointCount < 2} onClick={() => setIsPlanning(false)}>
-                  Finish route
+                <Button
+                  disabled={controlPointCount < 2 || document?.routing === undefined || sharingState.status === "saving"}
+                  onClick={finishRoute}
+                >
+                  {sharingState.status === "saving" ? "Saving…" : "Finish route"}
                 </Button>
               </>
             ) : isNewRoute ? (
-              <Button onClick={() => setIsPlanning(true)} variant="quiet">
+              <Button disabled={sharingState.status === "saving"} onClick={editRoute} variant="quiet">
                 Edit route
               </Button>
             ) : null}
@@ -430,6 +505,8 @@ function planningTitle(
 function appendControlPoint(
   document: RouteDocument,
   coordinate: Coordinate,
+  id: string,
+  name?: string,
 ): RouteDocument {
   const previous = document.controlPoints.map((point) => ({
     ...point,
@@ -439,9 +516,10 @@ function appendControlPoint(
   const controlPoints = [
     ...previous,
     {
-      id: createId("control"),
+      id,
       kind: isFirst ? ("start" as const) : ("finish" as const),
       ...coordinate,
+      ...(name === undefined ? {} : { name }),
     },
   ];
 
@@ -466,6 +544,21 @@ function renameControlPointById(document: RouteDocument, pointId: string, name: 
   };
 }
 
+function moveControlPoint(
+  document: RouteDocument,
+  pointId: string,
+  result: GeocodingResult,
+): RouteDocument {
+  return routeFromControlPoints(
+    document,
+    document.controlPoints.map((point) =>
+      point.id === pointId
+        ? { ...point, name: result.name, latitude: result.latitude, longitude: result.longitude }
+        : point,
+    ),
+  );
+}
+
 function normalizeControlPoints(controlPoints: RouteDocument["controlPoints"]): RouteDocument["controlPoints"] {
   return controlPoints.map((point, index, points) => ({
     ...point,
@@ -483,9 +576,11 @@ function routeFromControlPoints(
   controlPoints: RouteDocument["controlPoints"],
 ): RouteDocument {
   if (controlPoints.length >= 2) {
+    const { routing: _routing, summary: _summary, ...documentWithoutRoute } = document;
     return {
-      ...document,
+      ...documentWithoutRoute,
       controlPoints,
+      maneuvers: [],
     };
   }
 
@@ -533,8 +628,22 @@ function formatDuration(seconds: number): string {
   return hours === 0 ? `${minutes} min` : `${hours} hr ${remainingMinutes} min`;
 }
 
-function sameIds(points: RouteDocument["controlPoints"], ids: string[]): boolean {
-  return points.length === ids.length && points.every((point, index) => point.id === ids[index]);
+function controlPointKey(points: RouteDocument["controlPoints"]): string {
+  return points.map((point) => `${point.id}:${point.latitude}:${point.longitude}`).join("|");
+}
+
+function clearSharedRouteUrl(): void {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("route");
+  window.history.replaceState(null, "", url);
+}
+
+async function copyShareUrl(url: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // The URL remains in the address bar if clipboard permission is unavailable.
+  }
 }
 
 function toFilename(name: string): string {

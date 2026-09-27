@@ -8,6 +8,9 @@
     "packages/*"
   ],
   "scripts": {
+    "backend:down": "docker compose down",
+    "backend:logs": "docker compose logs -f pocketbase",
+    "backend:up": "docker compose up -d --build pocketbase",
     "dev": "turbo dev",
     "build": "turbo build",
     "check": "turbo check",

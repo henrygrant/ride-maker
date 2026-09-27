@@ -1,0 +1,65 @@
+services:
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    restart: unless-stopped
+    depends_on:
+      pocketbase:
+        condition: service_healthy
+    networks:
+      - proxy
+      - ride-maker
+    read_only: true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:mode=1777
+    environment:
+      XDG_CONFIG_HOME: /tmp/config
+      XDG_DATA_HOME: /tmp/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  pocketbase:
+    build:
+      context: ../infra/pocketbase
+      args:
+        PB_VERSION: 0.40.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8091:8080"
+    volumes:
+      - /home/henry/docker-data/ride-maker/pocketbase:/pb/pb_data
+    networks:
+      - ride-maker
+    read_only: true
+    user: "1000:1000"
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  proxy:
+    external: true
+  ride-maker:
+    driver: bridge

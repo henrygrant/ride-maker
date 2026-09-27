@@ -1,0 +1,31 @@
+:8080 {
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    request_body {
+        max_size 3MB
+    }
+
+    @api path /api/collections/users/* /api/collections/routes/* /api/oauth2-redirect /api/realtime /api/health
+    handle @api {
+        reverse_proxy pocketbase:8080
+    }
+
+    handle /api/* {
+        respond 404
+    }
+
+    handle /_* {
+        respond 404
+    }
+
+    handle {
+        root * /srv
+        try_files {path} /index.html
+        file_server
+    }
+}

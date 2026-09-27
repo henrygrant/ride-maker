@@ -41,4 +41,9 @@ export default defineConfig({
       resolve: { extensions: allExtensions },
     },
   },
+  server: {
+    proxy: {
+      "/api": "http://127.0.0.1:8090",
+    },
+  },
 });

@@ -1,0 +1,22 @@
+services:
+  pocketbase:
+    build:
+      context: ./infra/pocketbase
+      args:
+        PB_VERSION: 0.40.4
+    container_name: ride-maker-pocketbase
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - ./.data/pocketbase:/pb/pb_data
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:8080/api/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

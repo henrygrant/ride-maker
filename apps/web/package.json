@@ -11,10 +11,13 @@
   },
   "dependencies": {
     "@ride-maker/domain": "*",
+    "@ride-maker/geocoding": "*",
     "@ride-maker/gpx": "*",
+    "@ride-maker/persistence": "*",
     "@ride-maker/routing": "*",
     "@ride-maker/ui": "*",
     "maplibre-gl": "6.11.2",
+    "pocketbase": "^0.28.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-strict-dom": "0.0.55"
