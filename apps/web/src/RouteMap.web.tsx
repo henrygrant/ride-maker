@@ -1,6 +1,7 @@
 import type { RouteDocument } from "@ride-maker/domain";
 import { useEffect, useState } from "react";
 import * as maplibregl from "maplibre-gl";
+import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
 import { css, html } from "react-strict-dom";
 
 const ROUTE_SOURCE_ID = "active-route";
@@ -9,6 +10,8 @@ const ROUTE_LAYER_ID = "active-route-line";
 const CONTROL_SOURCE_ID = "route-controls";
 const CONTROL_CIRCLE_LAYER_ID = "route-control-circles";
 const CONTROL_LABEL_LAYER_ID = "route-control-labels";
+
+maplibregl.setWorkerUrl(workerUrl);
 
 const styles = css.create({
   map: {
