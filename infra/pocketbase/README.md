@@ -24,8 +24,8 @@ Stop the service with `npm run backend:down`. Local database files remain in
 
 ## Sign-in
 
-The web app supports email/password accounts immediately. Finishing a route
-requires a signed-in `users` account; viewing an unlisted link does not. Old
+The web app accepts Google or Apple sign-in only. Finishing a route requires a
+signed-in `users` account; viewing an unlisted link does not. Old
 unlisted routes remain viewable even though they have no owner.
 
 To enable Google or Apple, open the PocketBase dashboard, edit the `users`
