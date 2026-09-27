@@ -14,6 +14,7 @@ COPY . .
 RUN npm run build
 
 FROM caddy:2-alpine
+RUN apk add --no-cache libcap && setcap -r /usr/bin/caddy && apk del libcap
 COPY deploy/web.Caddyfile /etc/caddy/Caddyfile
 COPY --from=build /app/apps/web/dist /srv
 EXPOSE 8080
