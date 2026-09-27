@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Fixture Creator" xmlns="http://www.topografix.com/GPX/1/1">
+  <rte>
+    <name>Three stops</name>
+    <rtept lat="42.1000" lon="-71.1000"><name>Start</name></rtept>
+    <rtept lat="42.2000" lon="-71.2000"><name>Bakery</name></rtept>
+    <rtept lat="42.3000" lon="-71.3000"><name>Finish</name></rtept>
+  </rte>
+</gpx>

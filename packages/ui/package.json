@@ -1,0 +1,25 @@
+{
+  "name": "@ride-maker/ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -b --pretty false",
+    "test": "vitest run --passWithNoTests"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0",
+    "react-strict-dom": "0.0.55"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "react": "19.3.0",
+    "react-strict-dom": "0.0.55",
+    "typescript": "7.0.2",
+    "vitest": "5.0.2"
+  }
+}

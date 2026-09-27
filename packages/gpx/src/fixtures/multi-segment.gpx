@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Fixture Creator" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>River loop</name>
+    <desc>A short test ride</desc>
+  </metadata>
+  <wpt lat="40.7128" lon="-74.0060">
+    <ele>8.2</ele>
+    <name>Coffee</name>
+    <desc>Regroup here</desc>
+  </wpt>
+  <trk>
+    <name>Track name</name>
+    <trkseg>
+      <trkpt lat="40.7000" lon="-74.0100"><ele>4.5</ele><time>2026-09-27T12:00:00Z</time></trkpt>
+      <trkpt lat="40.7100" lon="-74.0000"><ele>7.0</ele></trkpt>
+    </trkseg>
+    <trkseg>
+      <trkpt lat="40.7200" lon="-73.9900"><ele>9.5</ele></trkpt>
+      <trkpt lat="40.7300" lon="-73.9800"><ele>6.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,0 +1,31 @@
+{
+  "name": "@ride-maker/web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b --pretty false",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@ride-maker/domain": "*",
+    "@ride-maker/gpx": "*",
+    "@ride-maker/routing": "*",
+    "@ride-maker/ui": "*",
+    "maplibre-gl": "6.11.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-strict-dom": "0.0.55"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.1",
+    "vite-plugin-babel": "1.7.3",
+    "vitest": "5.0.2"
+  }
+}
