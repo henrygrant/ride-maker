@@ -8,11 +8,15 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "bundleIdentifier": "net.thg3.ridemaker"
+      "bundleIdentifier": "net.thg3.ridemaker",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Show your position and guide you along a bike route while the app is open."
+      }
     },
     "android": {
-      "package": "net.thg3.ridemaker"
+      "package": "net.thg3.ridemaker",
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
     },
-    "plugins": ["@maplibre/maplibre-react-native"]
+    "plugins": ["@maplibre/maplibre-react-native", "expo-location"]
   }
 }

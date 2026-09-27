@@ -9,11 +9,18 @@ Plan bicycle routes on the web and view them in a native mobile app.
 - `packages/ui` — shared React Strict DOM components and design tokens
 - `packages/domain` and `packages/persistence` — shared route format and PocketBase access
 
-The mobile app is a viewer for now: it can list public routes or open any
-unlisted route by pasting its Ride Maker link or route ID. It does not edit
-routes, use location, or provide navigation. Since routes finished on the web
-are currently saved as **unlisted**, the public list may be empty; use a link
-to open one.
+The mobile app can list public routes or open any unlisted route by pasting
+its Ride Maker link or route ID. It does not edit routes. Since routes finished
+on the web are currently saved as **unlisted**, the public list may be empty;
+use a link to open one.
+
+For routed documents with saved maneuvers, **Start navigation** follows the
+route with foreground GPS and speaks upcoming turns. The screen stays awake
+while navigation is active. It warns when the rider leaves the route but does
+not reroute automatically. Routes without saved maneuvers can still be
+followed on the map, without turn prompts. Guidance stops when the app is
+backgrounded or the screen is locked; do not rely on it as the sole source of
+directions while riding.
 
 ## Mobile development
 
