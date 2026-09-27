@@ -19,6 +19,12 @@
         respond 404
     }
 
+    handle /_/ {
+        root * /srv
+        rewrite * /oauth-complete.html
+        file_server
+    }
+
     handle /_* {
         respond 404
     }
