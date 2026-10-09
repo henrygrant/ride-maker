@@ -41,7 +41,7 @@ be pasted into the app; universal/app links are not configured yet.
 The [mobile implementation plan](docs/mobile-plan.md) describes offline cycling
 navigation, shared React Strict DOM UI, validation milestones, and Sol/Gemini
 task handoffs. Start implementation with
-[the mobile foundation task](docs/tasks/001-mobile-foundation.md).
+[the background navigation spike](docs/tasks/001-background-spike.md).
 
 ## Commands
 

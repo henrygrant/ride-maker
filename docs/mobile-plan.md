@@ -1,6 +1,6 @@
 # Ride Maker mobile plan
 
-Status: planned, not implemented. Functionality first; visual design follows a
+Status: extension plan; an initial mobile viewer and foreground guidance already exist. Functionality first; visual design follows a
 successful real-device navigation test. Sol owns architecture, task contracts,
 integration, and review. Gemini Flash implements individual task briefs. Gemini
 is run in a separate T3 thread; it is not available through Sol's subagent tools.
@@ -26,6 +26,13 @@ navigating; report and recover interrupted sessions when it is reopened.
 
 - npm workspaces and Turbo already cover `apps/*` and `packages/*`.
 - `apps/web` is the Vite route planner, using MapLibre GL JS.
+- `apps/mobile` already uses Expo 57, React Native 0.86, MapLibre 11, foreground
+  Expo Location, Expo Speech, and keep-awake. It can open shared route links and
+  list public routes. It currently uses native React Native UI, not shared RSD.
+  It has no local GPX import, durable offline downloads, or background guidance.
+  Its navigation helper and tests live in `apps/mobile/src/navigation.*`.
+  Existing progress is clamped forward and ignores fix timestamps; replace those
+  limitations through reviewed contracts, rather than treating it as field-ready.
 - `packages/ui` uses React Strict DOM and shared design tokens.
 - `packages/domain` stores segments, control points, and indexed maneuvers.
 - `packages/gpx` imports tracks/routes and exports GPX; imported files have no
@@ -33,14 +40,14 @@ navigating; report and recover interrupted sessions when it is reopened.
 - `packages/routing` requests bicycle routes and retains Valhalla instructions.
   It currently uses a public endpoint, not a self-hosted service.
 - PocketBase stores route documents. The current persistence API supports
-  creating unlisted routes and fetching a shared route, not a complete personal
+  creating unlisted routes, listing public routes, and fetching a shared route, not a complete personal
   route library or mobile authentication workflow.
 
 ## Stack and ownership
 
 | Component | Choice and responsibility |
 | --- | --- |
-| `apps/mobile` | React Native, Expo development builds, Expo Router, TypeScript |
+| `apps/mobile` | Existing React Native/Expo app; TypeScript; add Expo Router when screen structure needs it |
 | General UI | React Strict DOM; reuse shared primitives and tokens |
 | Platform UI | Native navigation, safe areas, gestures, dialogs, file import |
 | Map | MapLibre React Native; native map and offline packs |
@@ -52,8 +59,8 @@ navigating; report and recover interrupted sessions when it is reopened.
 | Cloud routes | Existing PocketBase, added after local navigation works |
 | Map assets | OSM-derived vector tiles from a source explicitly allowing offline downloads |
 
-Pin a compatible stable Expo/React Native/MapLibre/RSD combination during the
-scaffold task. The web app's React and RSD versions must be checked against Expo
+Audit the existing Expo/React Native/MapLibre pins before adding RSD. Preserve
+the current workspace instead of scaffolding a replacement. The web app's React and RSD versions must be checked against Expo
 requirements; do not assume all current pins can remain identical. Verify that
 workspace resolution does not introduce duplicate React runtimes. Reuse UI
 pieces, not the planner screen layout. The current browser font-family token
@@ -143,7 +150,7 @@ route ending, especially when start and finish overlap.
 
 | Order | Deliverable | Acceptance gate |
 | --- | --- | --- |
-| 0 | Expo workspace and native feasibility spike | Install on target phone; render native map and RSD button; persist timestamped fixes; speak cues during a 20-minute locked-screen outing; stop the ride and confirm tracking/audio stop |
+| 0 | Existing mobile audit and native feasibility spike | Install on target phone; render native map and RSD button; persist timestamped fixes; speak cues during a 20-minute locked-screen outing; stop the ride and confirm tracking/audio stop |
 | 1 | Prepared-ride contracts and pure navigation engine | Replay fixtures for clean ride, wrong turn, GPS drift, parallel path, loop, reversal, pause/resume, and arrival; assert maneuver sequence, cue deduplication, and correct progress |
 | 2 | GPX preparation API and regional Valhalla | At least five representative cycling GPXs; preserve original; expose deviations and unmatched gaps; stable indexes; input limits/timeouts; no silent route substitution |
 | 3 | Local mobile ride workflow | Pick a GPX, preview preparation, save locally, start/pause/resume/end; inspect next maneuver and off-route state; reopen and recover an interrupted session |
@@ -179,7 +186,7 @@ task at a time with owned files, interfaces, acceptance checks, and escalation
 conditions. Gemini reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
-Start with [task 001](tasks/001-mobile-foundation.md). Do not independently change
+Start with [task 001](tasks/001-background-spike.md), extending the existing mobile app. Do not independently change
 architecture, schema versions, routing semantics, or production deployment.
 Escalate incompatibilities with evidence rather than installing unrelated
 libraries or repeatedly retrying a failing approach.
