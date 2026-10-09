@@ -3,6 +3,9 @@
 Assignee: Gemini Flash. Reviewer/integrator: Sol. Status: ready for implementation.
 Read `docs/mobile-plan.md`, repository instructions, and the existing mobile
 app before editing. Extend it; do not create a replacement Expo workspace.
+The first real-device target is the owner's Android phone. Prioritize an
+installable Android development build and its location foreground service;
+keep iOS configuration compatible but mark iOS field checks as pending.
 
 ## Outcome
 

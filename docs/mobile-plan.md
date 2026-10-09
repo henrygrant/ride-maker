@@ -14,8 +14,9 @@ and with the screen locked during an explicitly started ride.
 Include local route import, route preview, preparation warnings, download
 status, start/pause/resume/end, next maneuver and distance, remaining distance,
 voice prompts, and off-route alerts. No account is required for a local GPX.
-Support both platforms structurally, but validate the owner's phone first.
-First test platform is pending confirmation; this does not block scaffolding.
+Support both platforms structurally, but validate the owner's Android phone
+first. Android installation and locked-screen field checks are the first device
+gate; iOS field validation follows later.
 
 Defer automatic rerouting, on-device routing graphs, ride social features,
 advanced training statistics, and the visual redesign. Offline route following
