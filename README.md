@@ -10,6 +10,11 @@ Plan bicycle routes on the web and ride them with a native mobile app.
 The mobile app will be added as a separate Expo workspace when the shared web
 foundation is established.
 
+The [mobile implementation plan](docs/mobile-plan.md) describes offline cycling
+navigation, shared React Strict DOM UI, validation milestones, and Sol/Gemini
+task handoffs. Start implementation with
+[the mobile foundation task](docs/tasks/001-mobile-foundation.md).
+
 ## Commands
 
 ```sh
