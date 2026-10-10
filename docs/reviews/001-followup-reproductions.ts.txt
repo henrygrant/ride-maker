@@ -1,0 +1,43 @@
+import { describe, expect, it, vi } from "vitest";
+import { stopDiagnosticsSession } from "./session";
+import { handleDiagnosticLocations } from "./task-handler";
+import { InMemoryDiagnosticStorage } from "./storage";
+const base = {version:1,status:"running" as const,startedAt:10000,sampleCount:0,spokenCueIds:["diag-start"],cuesLog:[]};
+const location = () => ({
+ getPermissionsAsync: vi.fn(async () => ({foreground:"granted" as const,background:"granted" as const,canAskAgainForeground:true,canAskAgainBackground:true})),
+ requestForegroundPermissionsAsync: vi.fn(async () => "granted" as const), requestBackgroundPermissionsAsync: vi.fn(async () => "granted" as const),
+ isBackgroundLocationAvailableAsync: vi.fn(async () => true), hasStartedLocationUpdatesAsync: vi.fn(async () => false),
+ startBackgroundLocationUpdatesAsync: vi.fn(async () => {}),stopBackgroundLocationUpdatesAsync:vi.fn(async () => {})
+});
+const speech = () => ({speak:vi.fn(async () => {}),stop:vi.fn(async () => {}),isSpeakingAsync:vi.fn(async () => false)});
+const fix = (timestamp:number) => [{timestamp,coords:{latitude:0,longitude:0,accuracy:5}}];
+describe("Sol followup", () => {
+ it("keeps the newer session when an old running write arrives", async () => {
+  const s=new InMemoryDiagnosticStorage();
+  await s.saveSession({...base,sessionId:"new-session",version:10});
+  await s.saveSession({...base,sessionId:"old-session",version:2});
+  expect((await s.getSession())?.sessionId).toBe("new-session");
+ });
+ it("persists stopped state even when callbacks advance versions during native stop", async () => {
+  let entered!:()=>void,release!:()=>void;
+  const reached=new Promise<void>(r=>{entered=r});const gate=new Promise<void>(r=>{release=r});
+  const s=new InMemoryDiagnosticStorage();const l=location();const sp=speech();
+  await s.saveSession({...base,sessionId:"stop-version"});
+  l.stopBackgroundLocationUpdatesAsync.mockImplementation(async()=>{entered();await gate});
+  const stopping=stopDiagnosticsSession(s,l,sp);await reached;
+  await handleDiagnosticLocations(fix(45000),s,sp);
+  await handleDiagnosticLocations(fix(75000),s,sp);
+  release();await stopping;
+  expect((await s.getSession())?.status).toBe("stopped");
+ });
+ it("does not dispatch deferred speech after Stop resolves",async()=>{
+  let entered!:()=>void,release!:()=>void;
+  const reached=new Promise<void>(r=>{entered=r});const gate=new Promise<void>(r=>{release=r});
+  const s=new InMemoryDiagnosticStorage();const l=location();const sp=speech();const delivered:string[]=[];
+  await s.saveSession({...base,sessionId:"deferred-speech"});
+  sp.speak.mockImplementation(async(text:string)=>{entered();await gate;delivered.push(text)});
+  const pending=handleDiagnosticLocations(fix(45000),s,sp);await reached;
+  await stopDiagnosticsSession(s,l,sp);release();await pending;
+  expect(delivered).toHaveLength(0);
+ });
+});

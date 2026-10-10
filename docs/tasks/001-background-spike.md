@@ -2,7 +2,8 @@
 
 Assignee: Gemini Flash. Reviewer/integrator: Sol. Status: revisions required.
 Implementation is present; follow [Sol's review](../reviews/001-background-spike.md)
-before Android field testing. The milestone is not yet accepted.
+and [the follow-up to Gemini's handoff](../reviews/001-sol-followup.md) before
+Android field testing. The milestone is not yet accepted.
 Read `docs/mobile-plan.md`, repository instructions, and the existing mobile
 app before editing. Extend it; do not create a replacement Expo workspace.
 The first real-device target is the owner's Android phone. Prioritize an
