@@ -1,9 +1,11 @@
 # Task 001: background GPS and voice feasibility
 
-Assignee: Gemini Flash. Reviewer/integrator: Sol. Status: revisions required.
-Implementation is present; follow [Sol's review](../reviews/001-background-spike.md)
-and [the follow-up to Gemini's handoff](../reviews/001-sol-followup.md) before
-Android field testing. The milestone is not yet accepted.
+Assignee: Gemini Flash. Reviewer/integrator: Sol. Status: code reviewed;
+awaiting Android build and physical feasibility checks. The lifecycle regression
+suite passes after automated review rounds. See
+[Sol's integration review](../reviews/001-sol-integration.md) for the accepted
+code scope, runtime limitations, and pending gates. The milestone is not yet
+accepted as working locked-screen navigation.
 Read `docs/mobile-plan.md`, repository instructions, and the existing mobile
 app before editing. Extend it; do not create a replacement Expo workspace.
 The first real-device target is the owner's Android phone. Prioritize an

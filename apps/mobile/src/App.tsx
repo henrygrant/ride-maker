@@ -9,10 +9,14 @@ import { Camera, GeoJSONSource, Layer, Map, type CameraRef } from "@maplibre/map
 import { PocketBaseRouteRepository, type SavedRoute } from "@ride-maker/persistence";
 import { buildNavigationTrack, formatDistance, navigationFix, type NavigationFix } from "./navigation";
 import { routeGeometry, routeIdFromLink } from "./route-view";
+import { DiagnosticsView } from "./diagnostics/DiagnosticsView";
+import { FileSystemDiagnosticStorage } from "./diagnostics/file-storage";
 
 const repository = new PocketBaseRouteRepository("https://ridemaker.thg3.net/api");
+const diagnosticStorage = new FileSystemDiagnosticStorage();
 
 export default function App() {
+  const [viewMode, setViewMode] = useState<"routes" | "diagnostics">("routes");
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
   const [route, setRoute] = useState<SavedRoute | null>(null);
   const [input, setInput] = useState("");
@@ -34,6 +38,7 @@ export default function App() {
     try {
       setNavigating(false);
       setRoute(await repository.get(id));
+      setViewMode("routes");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load route.");
     } finally {
@@ -89,6 +94,20 @@ export default function App() {
       setError("This route has no usable track to follow.");
       return;
     }
+
+    // Prevent concurrent route speech and diagnostic session speech
+    try {
+      const activeDiag = await diagnosticStorage.getSession();
+      if (activeDiag && activeDiag.status === "running") {
+        setError("Please stop active background diagnostics before starting route navigation.");
+        return;
+      }
+    } catch {
+      // Continue if diagnostic storage check fails
+    }
+
+    void Speech.stop();
+
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
       if (permission.status !== "granted") {
@@ -169,6 +188,8 @@ export default function App() {
     }
   }, [navigating, position]);
 
+  const showDiagnosticsToggle = !route && (__DEV__ || process.env.EXPO_PUBLIC_ENABLE_DIAGNOSTICS === "true");
+
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
@@ -176,6 +197,19 @@ export default function App() {
         <View style={styles.header}>
           {route && <Pressable onPress={() => { stopNavigation(); setRoute(null); }}><Text style={styles.back}>‹ Routes</Text></Pressable>}
           <Text style={styles.brand}>Ride Maker</Text>
+          {showDiagnosticsToggle && (
+            <Pressable
+              onPress={() => {
+                void Speech.stop();
+                setViewMode((prev) => (prev === "routes" ? "diagnostics" : "routes"));
+              }}
+              style={styles.diagToggle}
+            >
+              <Text style={styles.diagToggleText}>
+                {viewMode === "diagnostics" ? "‹ Routes" : "Diagnostics"}
+              </Text>
+            </Pressable>
+          )}
         </View>
         {route ? (
           <>
@@ -218,6 +252,8 @@ export default function App() {
             </View>
             <Text style={styles.footer}>Foreground guidance only · keep the app open while riding</Text>
           </>
+        ) : viewMode === "diagnostics" ? (
+          <DiagnosticsView />
         ) : (
           <>
             <View style={styles.inputArea}>
@@ -267,6 +303,18 @@ const styles = StyleSheet.create({
   header: { minHeight: 58, paddingHorizontal: 20, flexDirection: "row", alignItems: "center", gap: 16, borderBottomWidth: 1, borderBottomColor: "#ddd9d0" },
   brand: { fontSize: 19, fontWeight: "700", color: "#1b2521" },
   back: { color: "#ec4b35", fontSize: 16, fontWeight: "600" },
+  diagToggle: {
+    marginLeft: "auto",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: "#e8eaed",
+  },
+  diagToggleText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#3c4043",
+  },
   routeHeader: { paddingHorizontal: 20, paddingVertical: 14, gap: 3 },
   routeTitle: { color: "#1b2521", fontSize: 22, fontWeight: "700" },
   muted: { color: "#69736f", fontSize: 14 },

@@ -10,13 +10,37 @@
     "ios": {
       "bundleIdentifier": "net.thg3.ridemaker",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Show your position and guide you along a bike route while the app is open."
+        "NSLocationWhenInUseUsageDescription": "Show your position and guide you along a bike route while the app is open.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Allow Ride Maker to access your location in the background for turn-by-turn cycling navigation.",
+        "UIBackgroundModes": [
+          "location",
+          "audio"
+        ]
       }
     },
     "android": {
       "package": "net.thg3.ridemaker",
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS"
+      ]
     },
-    "plugins": ["@maplibre/maplibre-react-native", "expo-location"]
+    "plugins": [
+      "@maplibre/maplibre-react-native",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Allow Ride Maker to access your location in the background for turn-by-turn cycling navigation.",
+          "locationWhenInUsePermission": "Show your position and guide you along a bike route while the app is open.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ]
+    ]
   }
 }
