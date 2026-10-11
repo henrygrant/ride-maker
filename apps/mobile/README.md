@@ -42,7 +42,7 @@ cd apps/mobile && npx expo start --dev-client
 ## Toolchain Status & Build Environment
 
 - **Remote Host (`nauvis`)**: Linux server without Android SDK (`ANDROID_HOME`), JDK (`javac`), `adb`, or macOS/Xcode.
-- **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git. The first `preview` cloud build has been submitted; native success and phone testing remain pending.
+- **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git. The first `preview` cloud build finished successfully on 2026-10-11; phone testing remains pending.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
   - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`).
@@ -180,8 +180,8 @@ This protocol tests Milestone 0 background feasibility (`docs/tasks/001-backgrou
 ## Review status and runtime limit
 
 Sol reviewed the diagnostics code on 2026-10-10. The 61 mobile tests, workspace
-checks/tests, and Android JavaScript export pass. The first standalone APK cloud build was submitted on 2026-10-11; its outcome
-and physical locked-screen results remain pending. The web UI cannot exercise this native
+checks/tests, and Android JavaScript export pass. The first standalone APK cloud build finished successfully on 2026-10-11;
+physical locked-screen results remain pending. The web UI cannot exercise this native
 spike. Existing route navigation remains foreground-only.
 
 Lifecycle locks, directory queues, and speech cancellation coordinate instances
@@ -196,3 +196,15 @@ occur. Do not infer field acceptance from unit tests.
 After any teardown error, use Stop again before clearing diagnostic data or
 starting another session. The screen keeps Stop available for native tracking,
 error, and stopping states.
+
+
+## First Android test build
+
+The 2026-10-11 `preview` build completed successfully:
+[build details](https://expo.dev/accounts/henrygrant/projects/ride-maker/builds/44173fb1-9fd4-4dc7-a85e-2c7af656a625).
+Download the APK from that build page on the Android phone and install it.
+Allow the browser to install this app if Android requests permission. Open Ride
+Maker, select Diagnostics, and start with a short locked-screen audio/GPS check
+before the full field protocol above. This build bundles JavaScript and does
+not need Metro. Physical GPS gaps, speech audibility, and battery use are still
+unverified.

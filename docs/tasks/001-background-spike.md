@@ -1,7 +1,7 @@
 # Task 001: background GPS and voice feasibility
 
 Assignee: Gemini Flash. Reviewer/integrator: Sol. Status: code reviewed;
-awaiting Android build and physical feasibility checks. The lifecycle regression
+Android APK built; awaiting physical feasibility checks. The lifecycle regression
 suite passes after automated review rounds. See
 [Sol's integration review](../reviews/001-sol-integration.md) for the accepted
 code scope, runtime limitations, and pending gates. The milestone is not yet

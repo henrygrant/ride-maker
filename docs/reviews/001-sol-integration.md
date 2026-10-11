@@ -49,3 +49,11 @@ The earlier authentication/project/signing blockers are resolved. Native build
 outcome and physical field acceptance remain pending. Local Android tools are
 still absent. No account credentials, authorization codes, or signing keys are
 included in Git.
+
+
+## Native build result (2026-10-11)
+
+EAS build `44173fb1-9fd4-4dc7-a85e-2c7af656a625` finished successfully and
+produced a standalone Android APK. Download/install is available on the build
+page linked above. No native build error was reported. This resolves the binary
+build gate; the physical locked-screen GPS/speech gate remains pending.
