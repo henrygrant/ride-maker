@@ -9,7 +9,8 @@
     "ios": "expo run:ios",
     "build": "tsc --noEmit",
     "check": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "../../scripts/mobile-e2e/run.sh"
   },
   "dependencies": {
     "@maplibre/maplibre-react-native": "11.4.0",

@@ -1,0 +1,7 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "this-id-deliberately-does-not-exist"

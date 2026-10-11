@@ -1,0 +1,78 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+
+- assertVisible:
+    id: "button-diagnostics-toggle"
+- tapOn:
+    id: "button-diagnostics-toggle"
+
+- assertVisible:
+    id: "text-diagnostics-title"
+- assertVisible:
+    id: "card-permissions"
+- assertVisible:
+    id: "badge-foreground-permission"
+- assertVisible:
+    text: "(?i)granted"
+- assertVisible:
+    id: "text-diagnostics-state"
+
+# Start diagnostics session
+- tapOn:
+    id: "button-diagnostics-start"
+- extendedWaitUntil:
+    visible:
+      id: "button-diagnostics-stop"
+    timeout: 10000
+- assertVisible: "RUNNING (Background Tracking Active)"
+- assertVisible:
+    id: "card-metrics"
+- assertVisible: "Elapsed Time"
+- assertVisible: "Fixes Recorded"
+- takeScreenshot: 04-diagnostics-running
+
+# Wait for companion feeder fixes to accumulate
+- extendedWaitUntil:
+    visible:
+      id: "text-metrics-fixes"
+      text: "[1-9][0-9]*"
+    timeout: 15000
+- takeScreenshot: 04-diagnostics-fixes-accumulated
+
+# Do not stop before the feeder has observed real counter growth.
+- extendedWaitUntil:
+    visible:
+      id: "test-samples-ready"
+    timeout: 25000
+
+# Stop diagnostics session
+- tapOn:
+    id: "button-diagnostics-stop"
+- extendedWaitUntil:
+    visible:
+      id: "button-diagnostics-start"
+    timeout: 10000
+- assertVisible: "STOPPED"
+- takeScreenshot: 04-diagnostics-stopped
+
+# Wait for feeder to verify native teardown and counter invariance, then signal verification
+- extendedWaitUntil:
+    visible:
+      id: "test-verification-signal"
+    timeout: 25000
+- assertVisible: "VERIFICATION_COMPLETE"
+- takeScreenshot: 04-diagnostics-verified
+
+# Clear session data
+- tapOn:
+    id: "button-diagnostics-clear"
+- extendedWaitUntil:
+    visible: "IDLE"
+    timeout: 10000
+- takeScreenshot: 04-diagnostics-cleared
+
+- tapOn:
+    id: "button-diagnostics-toggle"

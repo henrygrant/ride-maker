@@ -1,0 +1,49 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    permissions:
+      all: deny
+
+- assertVisible:
+    id: "button-diagnostics-toggle"
+- tapOn:
+    id: "button-diagnostics-toggle"
+
+- assertVisible:
+    id: "text-diagnostics-title"
+- assertVisible:
+    id: "card-permissions"
+- assertVisible:
+    id: "badge-foreground-permission"
+- assertNotVisible: "granted"
+- assertVisible:
+    id: "text-diagnostics-state"
+- assertVisible: "IDLE"
+
+# Tap Start Diagnostics while permission is ungranted/denied
+- tapOn:
+    id: "button-diagnostics-start"
+
+# If system dialog pops up, deny it
+- tapOn:
+    id: "com.android.permissioncontroller:id/permission_deny_button"
+    optional: true
+- tapOn:
+    text: "Don.*allow"
+    optional: true
+
+# Assert actionable error banner and state remains IDLE
+- extendedWaitUntil:
+    visible:
+      id: "banner-diagnostics-error"
+    timeout: 10000
+- assertVisible: "Foreground location permission is required for diagnostics."
+- assertVisible:
+    id: "text-diagnostics-state"
+- assertVisible: "IDLE"
+- takeScreenshot: 04a-diagnostics-permission-denied
+
+- tapOn:
+    id: "button-diagnostics-toggle"
+    optional: true

@@ -1,0 +1,59 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# Open synthetic route
+- tapOn: "Synthetic Test Route"
+
+# Assert route view elements
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Synthetic Test Route"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "0.4 km"
+- assertVisible:
+    id: "view-map"
+- assertVisible:
+    id: "button-navigation-toggle"
+- assertVisible: "Start navigation"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 30000
+- takeScreenshot: 03-route-map-overview
+
+# Start navigation
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "view-guidance"
+- assertVisible: "Stop navigation"
+- assertVisible:
+    id: "button-voice-toggle"
+- takeScreenshot: 03-route-navigation-active
+
+# Voice mute toggle
+- tapOn:
+    id: "button-voice-toggle"
+- assertVisible: "Unmute"
+- tapOn:
+    id: "button-voice-toggle"
+- assertVisible: "Mute"
+
+# Stop navigation
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible: "Start navigation"
+- assertNotVisible:
+    id: "view-guidance"
+
+# Return to main screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"

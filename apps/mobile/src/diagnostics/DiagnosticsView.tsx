@@ -25,13 +25,25 @@ const storage = new FileSystemDiagnosticStorage();
 const locationAdapter = new ExpoLocationAdapter();
 const speechAdapter = new ExpoSpeechAdapter();
 
-export function DiagnosticsView() {
+export interface DiagnosticsViewProps {
+  testVerified?: boolean;
+  testSamplesReady?: boolean;
+  onClearVerification?: () => void;
+}
+
+export function DiagnosticsView({
+  testVerified,
+  testSamplesReady,
+  onClearVerification,
+}: DiagnosticsViewProps = {}) {
+  const isTestMode = process.env.EXPO_PUBLIC_TEST_MODE === "true";
   const [session, setSession] = useState<DiagnosticSession | null>(null);
   const [permissions, setPermissions] = useState<LocationPermissionsStatus | null>(null);
   const [isTracking, setIsTracking] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(Date.now());
+  const [snapshotCount, setSnapshotCount] = useState(0);
 
   const refreshState = useCallback(async () => {
     try {
@@ -40,6 +52,7 @@ export function DiagnosticsView() {
 
       const recovered = await checkOrRecoverSession(storage, locationAdapter);
       setSession(recovered);
+      setSnapshotCount((prev) => prev + 1);
 
       const tracking = await locationAdapter.hasStartedLocationUpdatesAsync(
         BACKGROUND_DIAGNOSTICS_TASK
@@ -54,19 +67,37 @@ export function DiagnosticsView() {
     void refreshState();
   }, [refreshState]);
 
-  // Live timer tick every second while running
+  // Live timer tick every second while running, or continuously in test mode to guarantee fresh snapshots
   useEffect(() => {
-    if (session?.status !== "running") return;
+    if (!isTestMode && session?.status !== "running") return;
     const interval = setInterval(() => {
       setTick(Date.now());
       void refreshState();
     }, 1000);
     return () => clearInterval(interval);
-  }, [session?.status, refreshState]);
+  }, [isTestMode, session?.status, refreshState]);
 
   const summary = useMemo(() => {
     return buildDiagnosticSummary(session, DIAGNOSTIC_CUE_SCHEDULE.length);
   }, [session, tick]);
+
+  useEffect(() => {
+    if (!isTestMode) return;
+    const fixes = session?.sampleCount ?? 0;
+    const cues = session?.spokenCueIds?.length ?? 0;
+    const cueAttempts = session?.cuesLog?.length ?? 0;
+    console.log(
+      `[E2E_DIAG_STAGE] status="${session?.status ?? "none"}" isTracking=${isTracking} fixes=${fixes} cues=${cues} cueAttempts=${cueAttempts} snapshotCount=${snapshotCount}`
+    );
+  }, [
+    isTestMode,
+    session?.status,
+    session?.sampleCount,
+    session?.spokenCueIds?.length,
+    session?.cuesLog?.length,
+    isTracking,
+    snapshotCount,
+  ]);
 
   const handleStart = async () => {
     setBusy(true);
@@ -112,6 +143,7 @@ export function DiagnosticsView() {
     try {
       await storage.clear();
       setSession(null);
+      onClearVerification?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to clear data.");
     } finally {
@@ -132,9 +164,9 @@ export function DiagnosticsView() {
   const sessionError = session?.errorMessage;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView testID="view-diagnostics-scroll" style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.headerBox}>
-        <Text style={styles.title}>Background Spike Diagnostics</Text>
+        <Text testID="text-diagnostics-title" style={styles.title}>Background Spike Diagnostics</Text>
         <Text style={styles.subtitle}>
           Exercises locked-screen background GPS tracking and scheduled speech cues for
           Milestone 0 feasibility.
@@ -142,7 +174,7 @@ export function DiagnosticsView() {
       </View>
 
       {isInterrupted && (
-        <View style={styles.interruptedAlert}>
+        <View testID="alert-interrupted" style={styles.interruptedAlert}>
           <Text style={styles.alertTitle}>⚠️ Interrupted Session Detected</Text>
           <Text style={styles.alertBody}>
             The previous session was halted because the app was closed or killed before
@@ -151,18 +183,28 @@ export function DiagnosticsView() {
         </View>
       )}
 
+      {isTestMode && testSamplesReady && (
+        <Text testID="test-samples-ready">SAMPLES_CONFIRMED</Text>
+      )}
+      {isTestMode && testVerified && (
+        <View testID="test-verification-signal" style={styles.verifiedAlert}>
+          <Text>VERIFICATION_COMPLETE</Text>
+        </View>
+      )}
+
       {(error || sessionError) && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{error ?? sessionError}</Text>
+        <View testID="banner-diagnostics-error" style={styles.errorBox}>
+          <Text testID="text-diagnostics-error" style={styles.errorText}>{error ?? sessionError}</Text>
         </View>
       )}
 
       {/* Permissions Card */}
-      <View style={styles.card}>
+      <View testID="card-permissions" style={styles.card}>
         <Text style={styles.cardHeader}>Permission Status</Text>
         <View style={styles.row}>
           <Text style={styles.label}>Foreground Location:</Text>
           <Text
+            testID="badge-foreground-permission"
             style={[
               styles.badge,
               permissions?.foreground === "granted" ? styles.badgeSuccess : styles.badgeMuted,
@@ -174,6 +216,7 @@ export function DiagnosticsView() {
         <View style={styles.row}>
           <Text style={styles.label}>Background Location:</Text>
           <Text
+            testID="badge-background-permission"
             style={[
               styles.badge,
               permissions?.background === "granted" ? styles.badgeSuccess : styles.badgeMuted,
@@ -189,11 +232,12 @@ export function DiagnosticsView() {
       </View>
 
       {/* Session Controls */}
-      <View style={styles.card}>
+      <View testID="card-session-controls" style={styles.card}>
         <Text style={styles.cardHeader}>Diagnostic Session Control</Text>
         <View style={styles.statusRow}>
           <Text style={styles.label}>Current State:</Text>
           <Text
+            testID="text-diagnostics-state"
             style={[
               styles.statusText,
               isRunning
@@ -222,6 +266,9 @@ export function DiagnosticsView() {
         <View style={styles.buttonRow}>
           {needsStop ? (
             <Pressable
+              testID="button-diagnostics-stop"
+              accessibilityRole="button"
+              accessibilityLabel="Stop Diagnostics"
               onPress={handleStop}
               disabled={busy}
               style={[styles.button, styles.buttonStop]}
@@ -232,6 +279,9 @@ export function DiagnosticsView() {
             </Pressable>
           ) : (
             <Pressable
+              testID="button-diagnostics-start"
+              accessibilityRole="button"
+              accessibilityLabel="Start Diagnostics"
               onPress={handleStart}
               disabled={busy}
               style={[styles.button, styles.buttonStart]}
@@ -243,7 +293,10 @@ export function DiagnosticsView() {
           )}
 
           <Pressable
-            onPress={handleClear}
+            testID="button-diagnostics-clear"
+              accessibilityRole="button"
+              accessibilityLabel="Clear Data"
+              onPress={handleClear}
             disabled={busy || needsStop}
             style={[styles.button, styles.buttonSecondary]}
           >
@@ -254,7 +307,7 @@ export function DiagnosticsView() {
 
       {/* Metrics Card */}
       {summary && (
-        <View style={styles.card}>
+        <View testID="card-metrics" style={styles.card}>
           <Text style={styles.cardHeader}>GPS Intervals &amp; Counts</Text>
           <View style={styles.grid}>
             <View style={styles.gridItem}>
@@ -263,7 +316,7 @@ export function DiagnosticsView() {
             </View>
             <View style={styles.gridItem}>
               <Text style={styles.gridLabel}>Fixes Recorded</Text>
-              <Text style={styles.gridValue}>{summary.sampleCount}</Text>
+              <Text testID="text-metrics-fixes" style={styles.gridValue}>{summary.sampleCount}</Text>
             </View>
             <View style={styles.gridItem}>
               <Text style={styles.gridLabel}>Last Accuracy</Text>
@@ -302,7 +355,7 @@ export function DiagnosticsView() {
       )}
 
       {/* Cue Schedule Card */}
-      <View style={styles.card}>
+      <View testID="card-cues" style={styles.card}>
         <Text style={styles.cardHeader}>
           Voice Cue Schedule ({summary?.completedCueCount ?? 0} Completed /{" "}
           {DIAGNOSTIC_CUE_SCHEDULE.length} Scheduled)
@@ -345,7 +398,7 @@ export function DiagnosticsView() {
             }
 
             return (
-              <View key={cue.id} style={styles.cueRow}>
+              <View testID={`cue-item-${cue.id}`} key={cue.id} style={styles.cueRow}>
                 <Text style={iconStyle}>{icon}</Text>
                 <View style={styles.cueDetails}>
                   <View style={styles.cueHeaderRow}>
@@ -409,6 +462,7 @@ export function DiagnosticsView() {
 }
 
 const styles = StyleSheet.create({
+  verifiedAlert: { backgroundColor: "#d1e7dd", padding: 12, marginBottom: 16 },
   container: {
     flex: 1,
     backgroundColor: "#f7f7f8",

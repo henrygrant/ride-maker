@@ -1,0 +1,17 @@
+appId: net.thg3.ridemaker
+---
+- launchApp:
+    clearState: true
+- extendedWaitUntil:
+    visible:
+      id: "text-brand"
+    timeout: 20000
+- assertVisible:
+    id: "input-route-id"
+- assertVisible:
+    id: "button-view-route"
+- assertNotVisible:
+    id: "badge-test-mode"
+- assertNotVisible:
+    id: "button-diagnostics-toggle"
+- takeScreenshot: consumer-standalone-main

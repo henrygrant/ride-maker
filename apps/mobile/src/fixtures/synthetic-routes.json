@@ -1,0 +1,52 @@
+{
+  "id": "synthetictest01",
+  "slug": "synthetic-test-route",
+  "visibility": "public",
+  "document": {
+    "schemaVersion": 1,
+    "id": "synthetictest01",
+    "name": "Synthetic Test Route",
+    "description": "E2E automated testing route for baseline navigation and GPS simulation.",
+    "source": { "kind": "new" },
+    "segments": [
+      {
+        "id": "segment-1",
+        "points": [
+          { "latitude": 40.7800, "longitude": -73.9700 },
+          { "latitude": 40.7818, "longitude": -73.9700 },
+          { "latitude": 40.7818, "longitude": -73.9676 }
+        ]
+      }
+    ],
+    "controlPoints": [
+      { "id": "cp-start", "kind": "start", "latitude": 40.7800, "longitude": -73.9700, "name": "Start" },
+      { "id": "cp-turn", "kind": "via", "latitude": 40.7818, "longitude": -73.9700, "name": "Turn" },
+      { "id": "cp-finish", "kind": "finish", "latitude": 40.7818, "longitude": -73.9676, "name": "Finish" }
+    ],
+    "waypoints": [],
+    "maneuvers": [
+      {
+        "id": "maneuver-turn-right",
+        "segmentIndex": 0,
+        "shapeIndex": 1,
+        "latitude": 40.7818,
+        "longitude": -73.9700,
+        "instruction": "Turn right onto Test Way",
+        "verbalInstruction": "In 200 meters, turn right onto Test Way"
+      },
+      {
+        "id": "maneuver-arrive",
+        "segmentIndex": 0,
+        "shapeIndex": 2,
+        "latitude": 40.7818,
+        "longitude": -73.9676,
+        "instruction": "Arrive at destination",
+        "verbalInstruction": "You have arrived at your destination"
+      }
+    ],
+    "summary": {
+      "distanceMeters": 402,
+      "durationSeconds": 120
+    }
+  }
+}

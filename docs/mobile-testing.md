@@ -6,18 +6,21 @@ locked. The website is an optional planning/sharing companion. A local ride
 must not require an account or the production website.
 
 This document defines the test strategy and acceptance policy. It does not
-claim that the proposed harness, emulator, or flows are implemented. Start
-implementation with [task 002](tasks/002-mobile-test-foundation.md).
+claim that future replay, offline tile, or field gates are already satisfied.
+Foundation implementation details and review gates are tracked in
+[task 002](tasks/002-mobile-test-foundation.md).
 
 ## Decisions
 
 - Use Maestro for native UI regression flows and interactive agent inspection.
   Its accessibility-based React Native support works with Expo development
-  builds; its MCP server provides agent interaction. Verify compatibility with
-  our pinned Expo/React Native versions and actual Gemini provider before
+  builds and standalone APKs; its MCP server provides agent interaction.
+  Verify compatibility with our pinned Expo/React Native versions before
   adopting a specific Maestro version. Do not start by adding Detox or Appium.
 - Run everyday automation against a dedicated Android emulator on the Mac.
   Keep the owner's Samsung for device smoke checks and physical field evidence.
+  All automation scripts enforce strict device locking (`emulator-*` only;
+  physical devices such as `R5CY52MQVCY` are blacklisted).
 - Use deterministic ride replay for navigation decisions, and separate native
   GPS/audio checks for platform behavior. Replay is not evidence of background
   task delivery or audible speech.
@@ -36,22 +39,33 @@ The Expo example is a reference; EAS Workflows is not required for our local run
 
 ## Current baseline
 
-As of 2026-10-11:
+As of 2026-10-11 (Task 002 accepted emulator foundation):
 
 - The existing app opens shared routes, renders MapLibre, and provides foreground
-  guidance. Local GPX import and durable offline rides are not implemented.
-- Background diagnostics have 61 mobile unit/lifecycle tests and a built preview
-  APK. Actual locked-screen GPS/audio and battery results remain pending; see
+  guidance using `Location.watchPositionAsync` in `App.tsx`.
+- Standalone JS independence does not guarantee offline maps: the app loads
+  OpenFreeMap external styles online (`https://tiles.openfreemap.org/styles/liberty`).
+  Offline map tiles and offline styles remain unimplemented; the app footer
+  explicitly informs riders that open maps require network.
+- Background diagnostics have unit/lifecycle tests and a preview APK.
+  Physical locked-screen GPS/audio and battery field results remain pending; see
   [task 001](tasks/001-background-spike.md).
-- A local Expo Android development APK was built on the Mac from commit
-  `996cf37`, installed on the owner's Samsung, and loaded from Mac Metro over
-  USB. This was a manual smoke check, not an automated E2E suite.
-- Mac checkout: `~/code/ride-maker`; Android SDK:
-  `~/Library/Android/sdk`; Java 17; Node is managed by nvm. Noninteractive SSH
-  sessions need explicit toolchain initialization.
-- No AVD was listed by `emulator -list-avds`; Maestro was not found on the
-  noninteractive SSH command path. Installation and provider MCP access are
-  unverified. No repository Maestro flows, replay harness, or E2E runner exist.
+- Automated baseline runner (`scripts/mobile-e2e/run.sh`) executes on the Mac:
+  target device is dedicated AVD `ride-maker-e2e` (Android 14, API 34, ARM64) on
+  `emulator-5554`; owner Samsung `R5CY52MQVCY` is strictly protected.
+- Mac checkout: `~/code/ride-maker`; Android SDK: `~/Library/Android/sdk`;
+  Java 17 (`zulu-17.jdk`); Node is managed by nvm (`v24.16.0`);
+  Maestro CLI version: `2.11.0`.
+- Synthetic route fixture is located in NYC (`synthetictest01`): Start (-73.9700, 40.7800),
+  turn right onto Test Way at (-73.9700, 40.7818), and destination arrival at (-73.9676, 40.7818).
+  Native GPS injection uses `adb -s emulator-5554 emu geo fix <lon> <lat>`.
+- Noninteractive execution uses authorized SSH key `id_ed25519_github_nauvis`.
+  Direct provider MCP access remains unverified and pending.
+- Six current-functionality flows passed three fresh runs; native GPS ride
+  checkpoints and persisted post-stop invariance are independently reviewed.
+  Consumer isolation and deliberate failure cases pass their expected checks.
+- Local GPX import, route preparation, durable offline storage, and full
+  pure-engine replay remain pending future tasks.
 
 ## Test layers and what they prove
 
@@ -117,21 +131,19 @@ Never create/delete production routes as part of the default suite. Future GPX
 flows must exercise the Android document picker and verify copied app-private
 storage, including access after restart, rather than only seeding parsed data.
 
-Proposed repository layout (create as the foundation is implemented):
+Repository layout:
 
-- `apps/mobile/e2e/flows/`: committed Maestro flows grouped by smoke and feature.
-- `apps/mobile/e2e/fixtures/`: GPX, prepared routes, replay fixes, expected events,
-  and fixture provenance/version notes.
-- `scripts/mobile-e2e/`: Mac runner, toolchain/device checks, build/install,
-  fixture staging, evidence capture, teardown, and exit-status handling.
+- `apps/mobile/e2e/flows/`: committed Maestro flows (startup, invalid route, saved route, diagnostics, simulated ride).
+- `apps/mobile/src/fixtures/`: canonical JSON fixtures (`synthetic-routes.json`) used by the controlled local API and fixture unit tests.
+- `scripts/mobile-e2e/`: Mac runner (`run.sh`), synchronized native GPS feeder (`feed-gps.sh`), diagnostics verifier (`feed-diagnostics-gps.sh`), fixture server (`fixture-server.mjs`), manifest validator (`generate-manifests.mjs`).
 - Pure replay tests beside the eventual `packages/navigation` engine.
-- `.artifacts/mobile-e2e/<run-id>/`: ignored local output; add its ignore rule
-  when the runner is introduced. Never commit generated recordings or device data.
+- `.artifacts/mobile-e2e/<run-id>/`: ignored local output with manifests, summaries, scoped logs, and screenshots. Never commit generated recordings or device data.
 
 Test controls must be absent or disabled in consumer production builds. Use an
 explicit test build configuration; a public deep link must never activate fake
 GPS, seed state, or expose traces in the production app. Label simulated mode
-visibly. Also verify ordinary standalone builds without harness activation.
+visibly (`TEST MODE` badge rendered when `EXPO_PUBLIC_TEST_MODE=true`). Also
+verify ordinary standalone builds without harness activation.
 
 ## Coverage and acceptance matrix
 
@@ -142,14 +154,14 @@ pending now; an absent flow is not a pass.
 | --- | --- | --- |
 | Existing startup/shared route | Fixed route opens; native map renders; load error is actionable | Automated emulator flow plus screenshot review |
 | Diagnostics start/stop | Permission feedback; service starts; state persists; stop prevents later fixes/cues | Unit lifecycle tests, UI flow and native integration |
-| Local GPX import | Picker accepts track/route files; cancellation is harmless; malformed/oversized input gives a useful error | UI flows with real files; parser edge cases in unit tests |
-| Preparation | Original preserved; gaps/deviations visible; instructions/indexes valid; unavailable service handled | Controlled service responses, pure validation and opt-in integration |
-| Active navigation | Next turn/progress update; cues occur once; off-route/rejoin and correct arrival | Replay assertions plus UI integration |
-| Pause/resume/end | No guidance while paused; resume policy explicit; end stops location/audio | Replay, UI and native teardown checks |
-| Offline ride | Completed download reopens after force-stop with network blocked and Metro stopped; map/turns usable | Standalone APK cold-start flow and physical check |
-| Interrupted download/session | Incomplete ride cannot claim ready; resume/recovery explicit; force-stop cannot claim continued tracking | Persistence/relaunch flows and device check |
+| Local GPX import | Picker accepts track/route files; cancellation is harmless; malformed/oversized input gives a useful error | UI flows with real files; parser edge cases in unit tests (Pending) |
+| Preparation | Original preserved; gaps/deviations visible; instructions/indexes valid; unavailable service handled | Controlled service responses, pure validation and opt-in integration (Pending) |
+| Active navigation | Next turn/progress update; cues occur once; off-route/rejoin and correct arrival | Replay assertions plus UI integration (Baseline native GPS verified; pure replay pending) |
+| Pause/resume/end | No guidance while paused; resume policy explicit; end stops location/audio | Replay, UI and native teardown checks (Pending) |
+| Offline ride | Completed download reopens after force-stop with network blocked and Metro stopped; map/turns usable | Standalone APK cold-start flow and physical check (Pending offline tile bundling) |
+| Interrupted download/session | Incomplete ride cannot claim ready; resume/recovery explicit; force-stop cannot claim continued tracking | Persistence/relaunch flows and device check (Pending) |
 | Permissions/settings | Foreground denied; background denied; cannot-ask-again; notification denied; location disabled | Emulator flows and Samsung spot checks |
-| Screen lock/audio | Fixes and cues continue, stop succeeds, music/Bluetooth interruptions handled | Real 20-minute outing with counts/gaps, listening notes and battery delta |
+| Screen lock/audio | Fixes and cues continue, stop succeeds, music/Bluetooth interruptions handled | Real 20-minute outing with counts/gaps, listening notes and battery delta (Pending task 001) |
 
 For offline checks, prove the API/network is unreachable and Metro is stopped;
 keep ADB connected for control if useful. Assert tile/style/font/sprite coverage
@@ -167,17 +179,21 @@ of assuming Gemini CLI instructions configure the managed Antigravity provider.
 
 For foundation setup, test both interactive inspection (screen hierarchy,
 screenshot, tap, assertion) and CLI flow execution. Pin and record the working
-Maestro version, AVD system image/API/ABI, Java/Node and app dependency versions.
+Maestro version (`2.11.0`), AVD system image/API/ABI (`ride-maker-e2e`, API 34,
+ARM64), Java (`zulu-17.jdk`), Node (`v24.16.0`), and app dependency versions.
 Do not expose ADB or an unauthenticated device-control endpoint publicly.
 
 Use explicit device serials and serialize access: one device owner at a time,
-no simultaneous Sol/Gemini/manual taps. Default to the emulator. A personal
-phone check must preserve existing app data unless its reset is explicitly
+no simultaneous Sol/Gemini/manual taps. Default to the emulator (`emulator-5554`).
+A personal phone check must preserve existing app data unless its reset is explicitly
 requested; run destructive reset scenarios on the dedicated emulator.
 
 Development builds plus Metro provide the quick iteration loop. Rebuild native
 binaries when native dependencies/configuration change. Standalone test APKs
-bundle JavaScript, need no EAS payment, and must be tested with Metro stopped.
+bundle JavaScript and need no EAS payment. The dedicated emulator has no Metro
+port forwarding; cold-start assertions verify independence while the owner
+phone's separate Metro session stays running. Future offline gates must also
+block network access.
 Record the build command/profile and APK hash, not just the branch name.
 
 ## Run evidence and review policy
@@ -210,7 +226,7 @@ Existing locked-screen acceptance remains pending under task 001.
 ## Implementation order
 
 1. Complete task 002: Mac emulator and Maestro setup, verified Gemini access or
-   SSH CLI fallback, one reproducible startup flow, standalone launch, evidence
+   SSH CLI fallback, reproducible startup flow, standalone launch, evidence
    capture and documented commands. No routing/navigation behavior changes.
 2. Add deterministic local route/service fixtures and existing diagnostics
    permission/start/stop coverage. Extend only observable/test seams required.

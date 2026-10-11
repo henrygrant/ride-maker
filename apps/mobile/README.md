@@ -18,10 +18,32 @@ Verified against `apps/mobile/package.json` and the root lockfile:
 ## Mobile test strategy
 
 See [the canonical testing strategy](../../docs/mobile-testing.md) and
-[task 002](../../docs/tasks/002-mobile-test-foundation.md) for the planned Maestro
-emulator/agent harness, replay fixtures, standalone checks, and field gates.
-The E2E runner is not implemented yet; the commands below cover current unit,
-typecheck, bundling, and manual device workflows.
+[task 002](../../docs/tasks/002-mobile-test-foundation.md) for the Maestro
+emulator harness, synthetic fixtures, standalone checks, and baseline verification.
+
+### Automated End-to-End Tests (Maestro on Android Emulator)
+
+The mobile E2E test suite executes six automated flows against a dedicated Android emulator (`emulator-5554`):
+1. **01 Startup & Diagnostics**: App launch, brand title verification, diagnostics entry/exit.
+2. **02 Invalid Route**: Invalid route ID entry, error banner assertion, tap dismissal.
+3. **03 Saved Route Navigation**: Synthetic route load, distance & map assertions, foreground navigation start/stop, voice mute toggle.
+4. **04a Permission Denied**: Deny foreground permission at Start and assert actionable error and IDLE state.
+5. **04 Diagnostics Lifecycle**: Background tracking start/stop, metrics accumulation, and state teardown back to IDLE.
+6. **05 Simulated Ride**: Real-time native GPS waypoint feeding via `feed-gps.sh`, driving Expo's location adapter through turn maneuvers, off-route detection (>50m), arrival, and navigation teardown.
+
+To run the automated suite:
+```bash
+# Run all six baseline E2E flows
+./scripts/mobile-e2e/run.sh --serial emulator-5554
+
+# Rebuild standalone APK before testing
+./scripts/mobile-e2e/run.sh --serial emulator-5554 --build-apk
+
+# Run intentional failure demonstration
+./scripts/mobile-e2e/run.sh --serial emulator-5554 --demo-failure
+```
+
+Artifacts, screenshots, metadata, and logcat logs are saved to `.artifacts/mobile-e2e/<run-id>/`.
 
 ## Development Commands
 
@@ -50,11 +72,13 @@ cd apps/mobile && npx expo start --dev-client
 ## Toolchain Status & Build Environment
 
 - **Remote Host (`nauvis`)**: Linux server without Android SDK (`ANDROID_HOME`), JDK (`javac`), `adb`, or macOS/Xcode.
-- **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git. The first `preview` cloud build finished successfully on 2026-10-11; phone testing remains pending.
+- **Mac Build Host**: macOS with Android SDK (`~/Library/Android/sdk`), Java 17, Node (nvm), and Maestro CLI (`~/.maestro/bin/maestro`).
+- **Safety Lockout**: Physical personal devices (e.g. Samsung `R5CY52MQVCY`) and active dev sessions on port 8081 are strictly protected; the test runner rejects non-emulator devices and runs against dedicated emulator `emulator-5554`.
+- **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
   - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`).
-  - Android native manifest generation verified (`AndroidManifest.xml` includes `ACCESS_BACKGROUND_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, and `POST_NOTIFICATIONS`).
+  - Android native manifest includes required background permissions (`RECEIVE_BOOT_COMPLETED`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, and `POST_NOTIFICATIONS`).
   - Metro Android bundle export compiles cleanly to Hermes bytecode with module-scope background task registration.
 
 ---
@@ -64,9 +88,21 @@ cd apps/mobile && npx expo start --dev-client
 The build configurations are defined in `apps/mobile/eas.json`:
 
 1. **`preview` Profile (Standalone APK with Bundled JS — Recommended for Offline/Airplane Field Tests)**:
-   Embeds the compiled JavaScript runtime directly inside the APK. It does not require a running Metro server or network connection after installation, making it suitable for testing offline operation and airplane mode.
+   Embeds the compiled JavaScript runtime directly inside the APK. It cold starts without Metro. Maps still require network; offline tiles/styles remain unimplemented. Locked-screen audio and GPS need physical field validation.
 2. **`development` Profile (Dev Client APK)**:
-   Includes `expo-dev-client` for live debugging and connecting to the Metro bundler running on `nauvis`.
+   Includes `expo-dev-client` for live debugging and connecting to Metro on the development host (currently the Mac).
+
+Local standalone builds need no Expo account or paid cloud build:
+
+```bash
+# Run from the repository root on the Mac
+./scripts/mobile-e2e/bootstrap.sh --variant all
+./scripts/mobile-e2e/run.sh --serial emulator-5554 --verify-consumer
+```
+
+The runner uses a separate test package. Do not use the consumer verification
+command on a personal phone; automated testing requires AVD `ride-maker-e2e`.
+The following EAS instructions remain an optional cloud alternative.
 
 ### Step 1: Expo Account Setup (Owner Step)
 
@@ -123,6 +159,7 @@ npx expo run:android
 ### Location Permissions
 - **Foreground Location (`ACCESS_FINE_LOCATION`)**: Requested when starting diagnostics or route navigation.
 - **Background Location (`ACCESS_BACKGROUND_LOCATION`)**: Requested on Android 10+ when starting diagnostics to permit tracking when the screen is locked or the app is minimized. The system dialog prompts for "Allow all the time".
+- **Boot Completed (`RECEIVE_BOOT_COMPLETED`)**: Declared to permit Android 14 `JobScheduler` persistence for background location task registration without runtime exception.
 
 ### Notification Permissions (`POST_NOTIFICATIONS`)
 - Declared in `AndroidManifest.xml` for Android 13+ (API 33+).
@@ -183,36 +220,3 @@ This protocol tests Milestone 0 background feasibility (`docs/tasks/001-backgrou
   - Force quit / swipe the app away from recent apps.
   - Reopen Ride Maker.
   - Confirm the yellow **Interrupted Session Detected** banner is displayed and no spurious running state persists.
-
-
-## Review status and runtime limit
-
-Sol reviewed the diagnostics code on 2026-10-10. The 61 mobile tests, workspace
-checks/tests, and Android JavaScript export pass. The first standalone APK cloud build finished successfully on 2026-10-11;
-physical locked-screen results remain pending. The web UI cannot exercise this native
-spike. Existing route navigation remains foreground-only.
-
-Lifecycle locks, directory queues, and speech cancellation coordinate instances
-inside one JavaScript runtime. They do not coordinate distinct foreground and
-headless runtimes; Expo's TaskService maintains separate task-manager tables.
-This spike does not establish safe overlapping headless/foreground execution.
-Process death, force quit, and reopening need physical verification. A subsequent
-production background-navigation implementation must resolve this with native
-transactional persistence and explicit audio ownership if concurrent runtimes
-occur. Do not infer field acceptance from unit tests.
-
-After any teardown error, use Stop again before clearing diagnostic data or
-starting another session. The screen keeps Stop available for native tracking,
-error, and stopping states.
-
-
-## First Android test build
-
-The 2026-10-11 `preview` build completed successfully:
-[build details](https://expo.dev/accounts/henrygrant/projects/ride-maker/builds/44173fb1-9fd4-4dc7-a85e-2c7af656a625).
-Download the APK from that build page on the Android phone and install it.
-Allow the browser to install this app if Android requests permission. Open Ride
-Maker, select Diagnostics, and start with a short locked-screen audio/GPS check
-before the full field protocol above. This build bundles JavaScript and does
-not need Metro. Physical GPS gaps, speech audibility, and battery use are still
-unverified.

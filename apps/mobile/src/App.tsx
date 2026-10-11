@@ -6,13 +6,14 @@ import * as Location from "expo-location";
 import * as Speech from "expo-speech";
 import { useKeepAwake } from "expo-keep-awake";
 import { Camera, GeoJSONSource, Layer, Map, type CameraRef } from "@maplibre/maplibre-react-native";
-import { PocketBaseRouteRepository, type SavedRoute } from "@ride-maker/persistence";
+import type { SavedRoute } from "@ride-maker/persistence";
 import { buildNavigationTrack, formatDistance, navigationFix, type NavigationFix } from "./navigation";
 import { routeGeometry, routeIdFromLink } from "./route-view";
 import { DiagnosticsView } from "./diagnostics/DiagnosticsView";
 import { FileSystemDiagnosticStorage } from "./diagnostics/file-storage";
+import { createDefaultRouteRepository } from "./route-repository";
 
-const repository = new PocketBaseRouteRepository("https://ridemaker.thg3.net/api");
+const repository = createDefaultRouteRepository();
 const diagnosticStorage = new FileSystemDiagnosticStorage();
 
 export default function App() {
@@ -28,11 +29,17 @@ export default function App() {
   const [offRoute, setOffRoute] = useState(false);
   const [poorGps, setPoorGps] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
+  const [testVerified, setTestVerified] = useState(false);
+  const [testSamplesReady, setTestSamplesReady] = useState(false);
+  const [testMapRendered, setTestMapRendered] = useState(false);
   const cameraRef = useRef<CameraRef>(null);
   const progressRef = useRef(0);
   const spokenRef = useRef(new Set<string>());
 
+  const isTestMode = process.env.EXPO_PUBLIC_TEST_MODE === "true";
+
   const openRoute = useCallback(async (id: string) => {
+    setTestMapRendered(false);
     setBusy(true);
     setError(null);
     try {
@@ -60,24 +67,48 @@ export default function App() {
 
   useEffect(() => {
     void refresh();
-    const handleUrl = (url: string | null) => {
-      if (!url) return;
-      const id = routeIdFromLink(url);
+  }, [refresh]);
+
+  useEffect(() => {
+    const handleUrl = (event: { url: string }) => {
+      if (isTestMode && event.url === "ridemaker://test-samples-ready") {
+        setTestSamplesReady(true);
+        return;
+      }
+      if (isTestMode && event.url === "ridemaker://test-verified") {
+        setTestVerified(true);
+        return;
+      }
+      const id = routeIdFromLink(event.url);
       if (id) void openRoute(id);
     };
-    void Linking.getInitialURL().then(handleUrl);
-    const subscription = Linking.addEventListener("url", (event) => handleUrl(event.url));
-    return () => subscription.remove();
-  }, [openRoute, refresh]);
+    const subscription = Linking.addEventListener("url", handleUrl);
+    void Linking.getInitialURL().then((url) => {
+      if (url) {
+        if (isTestMode && url === "ridemaker://test-verified") {
+          setTestVerified(true);
+          return;
+        }
+        const id = routeIdFromLink(url);
+        if (id) void openRoute(id);
+      }
+    });
+    return () => {
+      subscription.remove();
+    };
+  }, [isTestMode, openRoute]);
 
-  const openInput = () => {
+  const openInput = useCallback(() => {
     const id = routeIdFromLink(input);
-    if (id) void openRoute(id);
-    else setError("Paste a Ride Maker route link or a 15-character route ID.");
-  };
+    if (!id) {
+      setError("Please paste a route link or 15-character route ID.");
+      return;
+    }
+    void openRoute(id);
+  }, [input, openRoute]);
 
-  const geometry = useMemo(() => route ? routeGeometry(route.document) : null, [route]);
-  const track = useMemo(() => route ? buildNavigationTrack(route.document) : null, [route]);
+  const geometry = useMemo(() => (route ? routeGeometry(route.document) : null), [route]);
+  const track = useMemo(() => (route ? buildNavigationTrack(route.document) : null), [route]);
   const distance = route?.document.summary?.distanceMeters;
 
   const stopNavigation = useCallback(() => {
@@ -188,6 +219,29 @@ export default function App() {
     }
   }, [navigating, position]);
 
+  useEffect(() => {
+    if (!navigating) return;
+    const instruction = poorGps
+      ? "Move to an open area."
+      : offRoute
+      ? "Return to the route line. Automatic rerouting isn't available yet."
+      : fix?.arrived
+      ? "You reached the end of the route."
+      : fix?.next?.maneuver.instruction ?? (track?.maneuvers.length ? "Continue to finish" : "No turn directions saved with this route.");
+    const distanceText = poorGps
+      ? "Waiting for accurate GPS"
+      : offRoute
+      ? "Off route"
+      : fix?.arrived
+      ? "Arrived"
+      : !fix
+      ? "Locating…"
+      : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters);
+    if (isTestMode) {
+      console.log(`[E2E_NAV_STAGE] instruction="${instruction}" distance="${distanceText}" arrived=${Boolean(fix?.arrived)} offRoute=${Boolean(offRoute)}`);
+    }
+  }, [isTestMode, navigating, poorGps, offRoute, fix, track]);
+
   const showDiagnosticsToggle = !route && (__DEV__ || process.env.EXPO_PUBLIC_ENABLE_DIAGNOSTICS === "true");
 
   return (
@@ -195,10 +249,14 @@ export default function App() {
       <StatusBar style="dark" />
       <SafeAreaView style={styles.screen}>
         <View style={styles.header}>
-          {route && <Pressable onPress={() => { stopNavigation(); setRoute(null); }}><Text style={styles.back}>‹ Routes</Text></Pressable>}
-          <Text style={styles.brand}>Ride Maker</Text>
+          {route && <Pressable testID="button-back" accessibilityRole="button" accessibilityLabel="Back to routes" onPress={() => { stopNavigation(); setRoute(null); }}><Text style={styles.back}>‹ Routes</Text></Pressable>}
+          <Text testID="text-brand" style={styles.brand}>Ride Maker</Text>
+          {isTestMode && <Text testID="badge-test-mode" style={styles.testBadge}>TEST MODE</Text>}
           {showDiagnosticsToggle && (
             <Pressable
+              testID="button-diagnostics-toggle"
+              accessibilityRole="button"
+              accessibilityLabel={viewMode === "diagnostics" ? "Back to routes" : "Open diagnostics"}
               onPress={() => {
                 void Speech.stop();
                 setViewMode((prev) => (prev === "routes" ? "diagnostics" : "routes"));
@@ -215,10 +273,10 @@ export default function App() {
           <>
             {navigating && <KeepScreenAwake />}
             <View style={styles.routeHeader}>
-              <Text style={styles.routeTitle}>{route.document.name}</Text>
-              {typeof distance === "number" && <Text style={styles.muted}>{(distance / 1000).toFixed(1)} km</Text>}
+              <Text testID="text-route-title" style={styles.routeTitle}>{route.document.name}</Text>
+              {typeof distance === "number" && <Text testID="text-route-distance" style={styles.muted}>{(distance / 1000).toFixed(1)} km</Text>}
             </View>
-            {navigating && <View style={styles.guidance}>
+            {navigating && <View testID="view-guidance" style={styles.guidance}>
               <Text style={styles.guidanceDistance}>
                 {poorGps ? "Waiting for accurate GPS" : offRoute ? "Off route" : fix?.arrived ? "Arrived" : !fix ? "Locating…" : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters)}
               </Text>
@@ -227,8 +285,9 @@ export default function App() {
               </Text>
               {fix && !offRoute && !poorGps && <Text style={styles.guidanceRemaining}>{formatDistance(fix.remainingMeters)} remaining</Text>}
             </View>}
-            <View style={styles.mapContainer}>
-              <Map mapStyle="https://tiles.openfreemap.org/styles/liberty" style={styles.map}>
+            {isTestMode && testMapRendered && <Text testID="test-map-rendered">MAP_RENDERED</Text>}
+            <View testID="view-map" style={styles.mapContainer}>
+              <Map mapStyle="https://tiles.openfreemap.org/styles/liberty" style={styles.map} onDidFinishRenderingMapFully={isTestMode ? () => setTestMapRendered(true) : undefined}>
                 <Camera
                   key={route.id}
                   ref={cameraRef}
@@ -245,20 +304,21 @@ export default function App() {
               </Map>
             </View>
             <View style={styles.navigationBar}>
-              {navigating && <Pressable onPress={() => setVoiceEnabled((value) => !value)} style={styles.voiceButton}><Text style={styles.action}>{voiceEnabled ? "Mute" : "Unmute"}</Text></Pressable>}
-              <Pressable onPress={() => navigating ? stopNavigation() : void startNavigation()} style={[styles.button, styles.navigationButton]}>
+              {navigating && <Pressable testID="button-voice-toggle" accessibilityRole="button" accessibilityLabel={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"} onPress={() => setVoiceEnabled((value) => !value)} style={styles.voiceButton}><Text style={styles.action}>{voiceEnabled ? "Mute" : "Unmute"}</Text></Pressable>}
+              <Pressable testID="button-navigation-toggle" accessibilityRole="button" accessibilityLabel={navigating ? "Stop navigation" : "Start navigation"} onPress={() => navigating ? stopNavigation() : void startNavigation()} style={[styles.button, styles.navigationButton]}>
                 <Text style={styles.buttonText}>{navigating ? "Stop navigation" : "Start navigation"}</Text>
               </Pressable>
             </View>
-            <Text style={styles.footer}>Foreground guidance only · keep the app open while riding</Text>
+            <Text style={styles.footer}>Foreground guidance only · maps require network</Text>
           </>
         ) : viewMode === "diagnostics" ? (
-          <DiagnosticsView />
+          <DiagnosticsView testVerified={testVerified} testSamplesReady={testSamplesReady} onClearVerification={() => { setTestVerified(false); setTestSamplesReady(false); }} />
         ) : (
           <>
             <View style={styles.inputArea}>
               <Text style={styles.sectionTitle}>Open a route</Text>
               <TextInput
+                testID="input-route-id"
                 accessibilityLabel="Route link or ID"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -269,7 +329,7 @@ export default function App() {
                 style={styles.input}
                 value={input}
               />
-              <Pressable onPress={openInput} style={styles.button}><Text style={styles.buttonText}>View route</Text></Pressable>
+              <Pressable testID="button-view-route" accessibilityRole="button" accessibilityLabel="View route" onPress={openInput} style={styles.button}><Text style={styles.buttonText}>View route</Text></Pressable>
             </View>
             <View style={styles.listHeader}>
               <Text style={styles.sectionTitle}>Public routes</Text>
@@ -287,7 +347,7 @@ export default function App() {
           </>
         )}
         {busy && <View style={styles.loading}><ActivityIndicator color="#ec4b35" /></View>}
-        {error && <Pressable onPress={() => setError(null)} style={styles.error}><Text style={styles.errorText}>{error}</Text></Pressable>}
+        {error && <Pressable testID="banner-error" accessibilityRole="button" accessibilityLabel="Dismiss error" onPress={() => setError(null)} style={styles.error}><Text style={styles.errorText}>{error}</Text></Pressable>}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -299,6 +359,7 @@ function KeepScreenAwake() {
 }
 
 const styles = StyleSheet.create({
+  testBadge: { fontSize: 10, color: "#855000", backgroundColor: "#fff0bf", padding: 3 },
   screen: { flex: 1, backgroundColor: "#f8f6f1" },
   header: { minHeight: 58, paddingHorizontal: 20, flexDirection: "row", alignItems: "center", gap: 16, borderBottomWidth: 1, borderBottomColor: "#ddd9d0" },
   brand: { fontSize: 19, fontWeight: "700", color: "#1b2521" },

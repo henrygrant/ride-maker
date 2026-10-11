@@ -1,0 +1,61 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# Open synthetic route
+- tapOn: "Synthetic Test Route"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Synthetic Test Route"
+
+# Start navigation
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "view-guidance"
+- assertVisible: "Stop navigation"
+
+# Stage 1: Initial GPS fix along track: verify turn instruction is active
+- extendedWaitUntil:
+    visible: "Turn right onto Test Way"
+    timeout: 30000
+- extendedWaitUntil:
+    visible: "(180|190|200|210|220) m"
+    timeout: 30000
+- takeScreenshot: 05-ride-turn-instruction
+
+# Stage 2: ~90 m remaining; permit +/-20 m native location-provider variation.
+- extendedWaitUntil:
+    visible: "(70|80|90|100|110) m"
+    timeout: 30000
+- assertVisible: "Turn right onto Test Way"
+- takeScreenshot: 05-ride-intermediate-progress
+
+# Stage 3: Off-route fix: verify off-route detection
+- extendedWaitUntil:
+    visible: "Off route"
+    timeout: 30000
+- assertVisible: "Return to the route line. Automatic rerouting isn't available yet."
+- takeScreenshot: 05-ride-off-route
+
+# Stage 4: Finish fix: verify arrival detection
+- extendedWaitUntil:
+    visible: "Arrived"
+    timeout: 30000
+- assertVisible: "You reached the end of the route."
+- takeScreenshot: 05-ride-arrived
+
+# Stop navigation
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible: "Start navigation"
+
+# Return to main screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"

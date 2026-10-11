@@ -1,0 +1,24 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "badge-test-mode"
+- takeScreenshot: 01-main-screen
+- tapOn:
+    id: "button-diagnostics-toggle"
+- assertVisible:
+    id: "text-diagnostics-title"
+- assertVisible:
+    id: "card-permissions"
+- assertVisible:
+    id: "text-diagnostics-state"
+- assertVisible: "IDLE"
+- takeScreenshot: 01-diagnostics-idle
+- tapOn:
+    id: "button-diagnostics-toggle"
+- assertVisible:
+    id: "text-brand"

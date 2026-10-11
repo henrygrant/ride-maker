@@ -1,0 +1,62 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 1. Malformed route ID (<15 chars / invalid format)
+- tapOn:
+    id: "input-route-id"
+- inputText: "bad!id"
+- hideKeyboard
+- assertVisible:
+    id: "button-view-route"
+- tapOn:
+    id: "button-view-route"
+- assertVisible:
+    id: "banner-error"
+- assertVisible: "Please paste a route link or 15-character route ID."
+- takeScreenshot: 02-malformed-id-error
+- tapOn:
+    id: "banner-error"
+
+# 2. Valid-format 15-character ID that does not exist on server (real 404)
+- tapOn:
+    id: "input-route-id"
+- eraseText: 10
+- inputText: "missingroute999"
+- hideKeyboard
+- tapOn:
+    id: "button-view-route"
+- extendedWaitUntil:
+    visible:
+      id: "banner-error"
+    timeout: 10000
+- assertVisible: "The requested resource wasn't found."
+- takeScreenshot: 02-missing-id-404-error
+- tapOn:
+    id: "banner-error"
+
+# 3. Valid shared route link format loading real canonical fixture
+- tapOn:
+    id: "input-route-id"
+- eraseText: 20
+- inputText: "https://ridemaker.thg3.net/?route=synthetictest01"
+- hideKeyboard
+- tapOn:
+    id: "button-view-route"
+- extendedWaitUntil:
+    visible:
+      id: "text-route-title"
+    timeout: 10000
+- assertVisible: "Synthetic Test Route"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "0.4 km"
+- takeScreenshot: 02-shared-link-success
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
