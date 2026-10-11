@@ -36,3 +36,16 @@ so there are no observed gap or audibility results to report.
 The implementation is suitable to build as a development feasibility probe.
 Task 001 is not accepted as proven background navigation; keep existing route
 navigation foreground-only until its real-device gate passes.
+
+
+## EAS build setup (2026-10-11)
+
+Expo authentication completed and the project is linked to
+`@henrygrant/ride-maker` (`b282abf3-3446-4e8b-a97f-bfd583a2e43c`). EAS generated
+remote Android signing credentials. The standalone `preview` build was uploaded:
+https://expo.dev/accounts/henrygrant/projects/ride-maker/builds/44173fb1-9fd4-4dc7-a85e-2c7af656a625
+
+The earlier authentication/project/signing blockers are resolved. Native build
+outcome and physical field acceptance remain pending. Local Android tools are
+still absent. No account credentials, authorization codes, or signing keys are
+included in Git.

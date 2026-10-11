@@ -42,7 +42,7 @@ cd apps/mobile && npx expo start --dev-client
 ## Toolchain Status & Build Environment
 
 - **Remote Host (`nauvis`)**: Linux server without Android SDK (`ANDROID_HOME`), JDK (`javac`), `adb`, or macOS/Xcode.
-- **Build Service & Account Requirements**: External Expo/EAS account authentication (`eas login`), project registration (`eas project:init`), signing credentials, and remote build triggers remain owner setup steps. No project IDs or signing keys are fabricated.
+- **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git. The first `preview` cloud build has been submitted; native success and phone testing remain pending.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
   - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`).
@@ -180,8 +180,8 @@ This protocol tests Milestone 0 background feasibility (`docs/tasks/001-backgrou
 ## Review status and runtime limit
 
 Sol reviewed the diagnostics code on 2026-10-10. The 61 mobile tests, workspace
-checks/tests, and Android JavaScript export pass. No installable APK or physical
-locked-screen result has been produced. The web UI cannot exercise this native
+checks/tests, and Android JavaScript export pass. The first standalone APK cloud build was submitted on 2026-10-11; its outcome
+and physical locked-screen results remain pending. The web UI cannot exercise this native
 spike. Existing route navigation remains foreground-only.
 
 Lifecycle locks, directory queues, and speech cancellation coordinate instances

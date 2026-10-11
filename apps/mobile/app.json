@@ -41,6 +41,12 @@
           "isIosBackgroundLocationEnabled": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "b282abf3-3446-4e8b-a97f-bfd583a2e43c"
+      }
+    },
+    "owner": "henrygrant"
   }
 }
