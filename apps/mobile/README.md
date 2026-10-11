@@ -15,6 +15,14 @@ Verified against `apps/mobile/package.json` and the root lockfile:
 - **expo-dev-client**: `~57.0.19`
 - **@maplibre/maplibre-react-native**: `11.4.0`
 
+## Mobile test strategy
+
+See [the canonical testing strategy](../../docs/mobile-testing.md) and
+[task 002](../../docs/tasks/002-mobile-test-foundation.md) for the planned Maestro
+emulator/agent harness, replay fixtures, standalone checks, and field gates.
+The E2E runner is not implemented yet; the commands below cover current unit,
+typecheck, bundling, and manual device workflows.
+
 ## Development Commands
 
 Run commands from the repository root:

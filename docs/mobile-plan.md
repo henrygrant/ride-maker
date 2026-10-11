@@ -1,9 +1,16 @@
 # Ride Maker mobile plan
 
-Status: extension plan; an initial mobile viewer and foreground guidance already exist. Functionality first; visual design follows a
-successful real-device navigation test. Sol owns architecture, task contracts,
-integration, and review. Gemini Flash implements individual task briefs. Gemini
-is run in a separate T3 thread; it is not available through Sol's subagent tools.
+Status: phone-first extension plan; an initial mobile viewer and foreground
+guidance already exist. Functionality first; visual design follows a successful
+real-device navigation test. Sol owns architecture, task contracts, integration,
+and review. Gemini Flash implements individual task briefs. Use T3 delegated
+tasks for Gemini implementation and review rounds; keep task contracts and
+evidence in this repository.
+
+The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
+Build [task 002: E2E foundation](tasks/002-mobile-test-foundation.md) before further
+mobile features; the existing [background spike](tasks/001-background-spike.md)
+still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
 

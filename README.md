@@ -1,6 +1,8 @@
 # Ride Maker
 
-Plan bicycle routes on the web and view them in a native mobile app.
+Phone-first cycling navigation, with an optional web route planner. The current
+mobile app is a route viewer with foreground guidance; the local GPX/offline
+workflow is the next product goal.
 
 ## Workspaces
 
@@ -40,8 +42,12 @@ be pasted into the app; universal/app links are not configured yet.
 
 The [mobile implementation plan](docs/mobile-plan.md) describes offline cycling
 navigation, shared React Strict DOM UI, validation milestones, and Sol/Gemini
-task handoffs. Start implementation with
-[the background navigation spike](docs/tasks/001-background-spike.md).
+task handoffs. The
+[mobile testing strategy](docs/mobile-testing.md) defines emulator/agent access,
+Maestro flows, ride replay, standalone checks, and physical acceptance gates.
+The [background navigation spike](docs/tasks/001-background-spike.md) awaits field
+checks; [task 002](docs/tasks/002-mobile-test-foundation.md) defines the testing
+foundation to build before further mobile features.
 
 ## Commands
 
