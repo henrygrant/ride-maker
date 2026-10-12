@@ -10,7 +10,8 @@ evidence in this repository.
 The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
 [Task 002: E2E foundation](tasks/002-mobile-test-foundation.md) is accepted.
 [Task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md) is accepted.
-Prepared-ride contracts and the navigation engine are next; the existing [background spike](tasks/001-background-spike.md)
+Next is [task004: mobile creation and primary surfaces](tasks/004-mobile-ride-creation.md);
+prepared-ride contracts and the navigation engine follow; the existing [background spike](tasks/001-background-spike.md)
 still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
@@ -28,7 +29,8 @@ gate; iOS field validation follows later.
 
 Keep the main flow Open GPX → preview → Ride, with automatic local saving.
 Task003 first delivers import/preview/storage without enabling guidance for raw
-GPX geometry; preparation and the engine follow. Route creation is deferred.
+GPX geometry. Task004 adds mobile creation and a My rides / Create / Navigate
+structure so real foreground rides can be tested; preparation and the engine follow.
 
 Defer automatic rerouting, on-device routing graphs, ride social features,
 advanced training statistics, and the visual redesign. Offline route following
@@ -167,12 +169,13 @@ route ending, especially when start and finish overlap.
 | --- | --- | --- |
 | 0 | Existing mobile audit and native feasibility spike | Install on target phone; render native map and RSD button; persist timestamped fixes; speak cues during a 20-minute locked-screen outing; stop the ride and confirm tracking/audio stop |
 | 1 | Local GPX import and saved routes | Native picker, original preservation, segmented preview, automatic save and standalone reopening without network; raw imports do not claim turn guidance (task003) |
-| 2 | Prepared-ride contracts and pure navigation engine | Replay fixtures for clean ride, wrong turn, GPS drift, parallel path, loop, reversal, pause/resume, and arrival; assert maneuver sequence, cue deduplication, and correct progress |
-| 3 | GPX preparation API and regional Valhalla | At least five representative cycling GPXs; preserve original; expose deviations and unmatched gaps; stable indexes; input limits/timeouts; no silent route substitution |
-| 4 | Complete local mobile ride workflow | Pick a GPX, preview preparation, save locally, start/pause/resume/end; inspect next maneuver and off-route state; reopen and recover an interrupted session |
-| 5 | Offline maps and dependable audio | Download then relaunch in airplane mode; map and turns work with screen locked; test Bluetooth, silent mode, music interruption, missing voice assets, and interrupted downloads |
-| 6 | Web-to-phone handoff | Open saved-route links; retain existing maneuvers; persist downloaded route offline; add mobile OAuth and secure token storage only where account features require them |
-| 7 | Field validation and design pass | Complete representative real rides; record GPS gaps, cue failures, battery consumption, and fixes before polishing visuals |
+| 2 | Mobile ride creation and primary surfaces | Search/map points, optional stops, valid routed preview, local generated instructions, library management and stored foreground navigation (task004) |
+| 3 | Prepared-ride contracts and pure navigation engine | Replay fixtures for clean ride, wrong turn, GPS drift, parallel path, loop, reversal, pause/resume, and arrival; assert maneuver sequence, cue deduplication, and correct progress |
+| 4 | GPX preparation API and regional Valhalla | At least five representative cycling GPXs; preserve original; expose deviations and unmatched gaps; stable indexes; input limits/timeouts; no silent route substitution |
+| 5 | Complete local mobile ride workflow | Pick a GPX, preview preparation, save locally, start/pause/resume/end; inspect next maneuver and off-route state; reopen and recover an interrupted session |
+| 6 | Offline maps and dependable audio | Download then relaunch in airplane mode; map and turns work with screen locked; test Bluetooth, silent mode, music interruption, missing voice assets, and interrupted downloads |
+| 7 | Web-to-phone handoff | Open saved-route links; retain existing maneuvers; persist downloaded route offline; add mobile OAuth and secure token storage only where account features require them |
+| 8 | Field validation and design pass | Complete representative real rides; record GPS gaps, cue failures, battery consumption, and fixes before polishing visuals |
 
 Milestone 0 uses a bundled prepared fixture to exercise location/audio without
 waiting for Valhalla or production tiles. Its background spike is evidence, not
@@ -181,7 +184,7 @@ module; decide from the spike instead of assuming `expo-speech` is sufficient.
 Record device/OS/build, permission states, observed update gaps, audio behavior,
 and battery consumption. Simulators and replay tests cannot satisfy field gates.
 
-For milestone 3, start with a regional OSM extract covering actual test rides.
+For milestone 4, start with a regional OSM extract covering actual test rides.
 Choose coverage before provisioning; no planet-wide import initially. Document
 tile generation, resource requirements, updates, attribution, and recovery.
 The API enforces request-size/point limits, timeouts, concurrency bounds, rate
@@ -202,8 +205,8 @@ task at a time with owned files, interfaces, acceptance checks, and escalation
 conditions. Gemini reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
-Task003 is accepted; the next bounded task will define prepared-ride and navigation
-engine contracts before implementation. Do not independently change
+Task003 is accepted. Current implementation task: [task004](tasks/004-mobile-ride-creation.md).
+Prepared-ride/navigation-engine contracts will be a subsequent bounded task. Do not independently change
 architecture, schema versions, routing semantics, or production deployment.
 Escalate incompatibilities with evidence rather than installing unrelated
 libraries or repeatedly retrying a failing approach.
