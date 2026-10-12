@@ -230,9 +230,11 @@ Existing locked-screen acceptance remains pending under task 001.
    capture and documented commands. No routing/navigation behavior changes.
 2. Add deterministic local route/service fixtures and existing diagnostics
    permission/start/stop coverage. Extend only observable/test seams required.
-3. Define production navigation engine interfaces and the replay fixture format,
+3. Develop GPX import and local ride storage with picker/persistence flows under
+   [task 003](tasks/003-local-gpx-import.md). Raw imports remain preview-only until
+   turn preparation is implemented; offline route data does not imply offline maps.
+4. Define production navigation engine interfaces and the replay fixture format,
    then build the replay matrix alongside the engine milestone.
-4. Develop GPX import and local ride storage with picker/persistence flows.
 5. Add offline/native/background acceptance flows as those features land and
    complete the physical field protocol before claiming reliable navigation.
 6. Once local runs are stable, reuse the runner on a CI host with an emulator;

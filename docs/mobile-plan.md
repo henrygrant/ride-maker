@@ -3,13 +3,14 @@
 Status: phone-first extension plan; an initial mobile viewer and foreground
 guidance already exist. Functionality first; visual design follows a successful
 real-device navigation test. Sol owns architecture, task contracts, integration,
-and review. Gemini Flash implements individual task briefs. Use T3 delegated
+and review. Gemini implements individual task briefs using the selected delegated model. Use T3 delegated
 tasks for Gemini implementation and review rounds; keep task contracts and
 evidence in this repository.
 
 The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
-Build [task 002: E2E foundation](tasks/002-mobile-test-foundation.md) before further
-mobile features; the existing [background spike](tasks/001-background-spike.md)
+[Task 002: E2E foundation](tasks/002-mobile-test-foundation.md) is accepted.
+Next is [task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md),
+before navigation engine implementation; the existing [background spike](tasks/001-background-spike.md)
 still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
@@ -24,6 +25,10 @@ voice prompts, and off-route alerts. No account is required for a local GPX.
 Support both platforms structurally, but validate the owner's Android phone
 first. Android installation and locked-screen field checks are the first device
 gate; iOS field validation follows later.
+
+Keep the main flow Open GPX → preview → Ride, with automatic local saving.
+Task003 first delivers import/preview/storage without enabling guidance for raw
+GPX geometry; preparation and the engine follow. Route creation is deferred.
 
 Defer automatic rerouting, on-device routing graphs, ride social features,
 advanced training statistics, and the visual redesign. Offline route following
@@ -159,12 +164,13 @@ route ending, especially when start and finish overlap.
 | Order | Deliverable | Acceptance gate |
 | --- | --- | --- |
 | 0 | Existing mobile audit and native feasibility spike | Install on target phone; render native map and RSD button; persist timestamped fixes; speak cues during a 20-minute locked-screen outing; stop the ride and confirm tracking/audio stop |
-| 1 | Prepared-ride contracts and pure navigation engine | Replay fixtures for clean ride, wrong turn, GPS drift, parallel path, loop, reversal, pause/resume, and arrival; assert maneuver sequence, cue deduplication, and correct progress |
-| 2 | GPX preparation API and regional Valhalla | At least five representative cycling GPXs; preserve original; expose deviations and unmatched gaps; stable indexes; input limits/timeouts; no silent route substitution |
-| 3 | Local mobile ride workflow | Pick a GPX, preview preparation, save locally, start/pause/resume/end; inspect next maneuver and off-route state; reopen and recover an interrupted session |
-| 4 | Offline maps and dependable audio | Download then relaunch in airplane mode; map and turns work with screen locked; test Bluetooth, silent mode, music interruption, missing voice assets, and interrupted downloads |
-| 5 | Web-to-phone handoff | Open saved-route links; retain existing maneuvers; persist downloaded route offline; add mobile OAuth and secure token storage only where account features require them |
-| 6 | Field validation and design pass | Complete representative real rides; record GPS gaps, cue failures, battery consumption, and fixes before polishing visuals |
+| 1 | Local GPX import and saved routes | Native picker, original preservation, segmented preview, automatic save and standalone reopening without network; raw imports do not claim turn guidance (task003) |
+| 2 | Prepared-ride contracts and pure navigation engine | Replay fixtures for clean ride, wrong turn, GPS drift, parallel path, loop, reversal, pause/resume, and arrival; assert maneuver sequence, cue deduplication, and correct progress |
+| 3 | GPX preparation API and regional Valhalla | At least five representative cycling GPXs; preserve original; expose deviations and unmatched gaps; stable indexes; input limits/timeouts; no silent route substitution |
+| 4 | Complete local mobile ride workflow | Pick a GPX, preview preparation, save locally, start/pause/resume/end; inspect next maneuver and off-route state; reopen and recover an interrupted session |
+| 5 | Offline maps and dependable audio | Download then relaunch in airplane mode; map and turns work with screen locked; test Bluetooth, silent mode, music interruption, missing voice assets, and interrupted downloads |
+| 6 | Web-to-phone handoff | Open saved-route links; retain existing maneuvers; persist downloaded route offline; add mobile OAuth and secure token storage only where account features require them |
+| 7 | Field validation and design pass | Complete representative real rides; record GPS gaps, cue failures, battery consumption, and fixes before polishing visuals |
 
 Milestone 0 uses a bundled prepared fixture to exercise location/audio without
 waiting for Valhalla or production tiles. Its background spike is evidence, not
@@ -173,7 +179,7 @@ module; decide from the spike instead of assuming `expo-speech` is sufficient.
 Record device/OS/build, permission states, observed update gaps, audio behavior,
 and battery consumption. Simulators and replay tests cannot satisfy field gates.
 
-For milestone 2, start with a regional OSM extract covering actual test rides.
+For milestone 3, start with a regional OSM extract covering actual test rides.
 Choose coverage before provisioning; no planet-wide import initially. Document
 tile generation, resource requirements, updates, attribution, and recovery.
 The API enforces request-size/point limits, timeouts, concurrency bounds, rate
@@ -194,7 +200,7 @@ task at a time with owned files, interfaces, acceptance checks, and escalation
 conditions. Gemini reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
-Start with [task 001](tasks/001-background-spike.md), extending the existing mobile app. Do not independently change
+Current implementation task: [task 003](tasks/003-local-gpx-import.md), extending the existing mobile app. Do not independently change
 architecture, schema versions, routing semantics, or production deployment.
 Escalate incompatibilities with evidence rather than installing unrelated
 libraries or repeatedly retrying a failing approach.
