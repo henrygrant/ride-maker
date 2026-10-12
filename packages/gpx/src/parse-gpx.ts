@@ -11,8 +11,12 @@ import { XMLParser, XMLValidator } from "fast-xml-parser";
 
 type XmlNode = Record<string, unknown>;
 
+export const MAX_GEOMETRY_POINTS = 100_000;
+export const MAX_GPX_BYTES = 10 * 1024 * 1024; // 10 MiB
+
 export type ParseGpxOptions = {
-  filename?: string;
+  filename?: string | undefined;
+  maxPoints?: number | undefined;
 };
 
 export class GpxParseError extends Error {
@@ -31,6 +35,10 @@ export function parseGpx(
   xml: string,
   options: ParseGpxOptions = {},
 ): RouteDocument {
+  if (/<!DOCTYPE/i.test(xml) || /<!ENTITY/i.test(xml)) {
+    throw new GpxParseError("DTD and entity declarations are not permitted.");
+  }
+
   const validation = XMLValidator.validate(xml);
   if (validation !== true) {
     throw new GpxParseError(`Invalid XML: ${validation.err.msg}`);
@@ -44,35 +52,59 @@ export function parseGpx(
 
   const tracks = asArray(gpx.trk).map(asRequiredNode);
   const routes = asArray(gpx.rte).map(asRequiredNode);
-  const segments = parseTrackSegments(tracks);
+  const trackSegments = parseTrackSegments(tracks);
+  const routeSegments = parseRouteSegments(routes);
+  const segments = trackSegments.length > 0 ? trackSegments : routeSegments;
+
   const routePoints = routes.flatMap((route) =>
     asArray(route.rtept).map(asRequiredNode),
   );
 
-  if (segments.length === 0 && routePoints.length > 0) {
-    segments.push({
-      id: createId("segment"),
-      points: routePoints.map(parsePoint),
-    });
+  if (segments.length === 0 || segments.every((segment) => segment.points.length === 0)) {
+    throw new GpxParseError("The GPX file does not contain a track or route.");
   }
 
-  if (segments.every((segment) => segment.points.length === 0)) {
-    throw new GpxParseError("The GPX file does not contain a track or route.");
+  const maxPoints = options.maxPoints ?? MAX_GEOMETRY_POINTS;
+  const totalPoints = segments.reduce((sum, s) => sum + s.points.length, 0);
+  if (totalPoints > maxPoints) {
+    throw new GpxParseError(`Route exceeds the maximum limit of ${maxPoints.toLocaleString()} points.`);
+  }
+
+  const hasUsableSegment = segments.some((segment) => {
+    if (segment.points.length < 2) return false;
+    const first = segment.points[0]!;
+    return segment.points.some(
+      (p) => p.latitude !== first.latitude || p.longitude !== first.longitude,
+    );
+  });
+  if (!hasUsableSegment) {
+    throw new GpxParseError("The GPX file does not contain usable geometry (requires at least two distinct points).");
   }
 
   const metadata = asNode(gpx.metadata);
   const filenameName = stripGpxExtension(options.filename);
   const name =
     readText(metadata?.name) ??
-    tracks.map((track) => readText(track.name)).find(isDefined) ??
-    routes.map((route) => readText(route.name)).find(isDefined) ??
+    (trackSegments.length > 0
+      ? tracks.map((track) => readText(track.name)).find(isDefined)
+      : routes.map((route) => readText(route.name)).find(isDefined)) ??
+    (trackSegments.length > 0
+      ? routes.map((route) => readText(route.name)).find(isDefined)
+      : tracks.map((track) => readText(track.name)).find(isDefined)) ??
     filenameName ??
     "Imported route";
   const description =
     readText(metadata?.desc) ??
-    tracks.map((track) => readText(track.desc)).find(isDefined) ??
-    routes.map((route) => readText(route.desc)).find(isDefined);
+    (trackSegments.length > 0
+      ? tracks.map((track) => readText(track.desc)).find(isDefined)
+      : routes.map((route) => readText(route.desc)).find(isDefined)) ??
+    (trackSegments.length > 0
+      ? routes.map((route) => readText(route.desc)).find(isDefined)
+      : tracks.map((track) => readText(track.desc)).find(isDefined));
 
+  // Policy: if route points exist, they provide the control points (turn points / waypoints)
+  // regardless of whether track segments provide the high-resolution line geometry,
+  // preserving existing mixed GPX support. Otherwise infer endpoints from segments.
   const controlPoints =
     routePoints.length > 0
       ? parseControlPoints(routePoints)
@@ -100,15 +132,40 @@ export function parseGpx(
 }
 
 function parseTrackSegments(tracks: XmlNode[]): RouteSegment[] {
-  return tracks.flatMap((track) =>
-    asArray(track.trkseg).map((rawSegment) => {
-      const segment = asRequiredNode(rawSegment);
-      return {
+  return tracks.flatMap((track) => {
+    const rawSegments = asArray(track.trkseg);
+    return rawSegments.flatMap((rawSegment) => {
+      const segment = asNode(rawSegment);
+      if (segment === undefined) return [];
+      const rawPoints = asArray(segment.trkpt);
+      const points: RoutePoint[] = [];
+      for (const p of rawPoints) {
+        const pNode = asNode(p);
+        if (pNode !== undefined) points.push(parsePoint(pNode));
+      }
+      if (points.length === 0) return [];
+      return [{
         id: createId("segment"),
-        points: asArray(segment.trkpt).map(asRequiredNode).map(parsePoint),
-      };
-    }),
-  );
+        points,
+      }];
+    });
+  });
+}
+
+function parseRouteSegments(routes: XmlNode[]): RouteSegment[] {
+  return routes.flatMap((route) => {
+    const rawPoints = asArray(route.rtept);
+    const points: RoutePoint[] = [];
+    for (const p of rawPoints) {
+      const pNode = asNode(p);
+      if (pNode !== undefined) points.push(parsePoint(pNode));
+    }
+    if (points.length === 0) return [];
+    return [{
+      id: createId("segment"),
+      points,
+    }];
+  });
 }
 
 function parseControlPoints(points: XmlNode[]): ControlPoint[] {
@@ -200,6 +257,15 @@ function readCoordinate(
   minimum: number,
   maximum: number,
 ): number {
+  if (
+    value === undefined ||
+    value === null ||
+    (typeof value === "string" && value.trim() === "") ||
+    typeof value === "boolean"
+  ) {
+    throw new GpxParseError(`Missing or blank ${label} value`);
+  }
+
   const number = Number(value);
   if (!Number.isFinite(number) || number < minimum || number > maximum) {
     throw new GpxParseError(`Invalid ${label} value: ${String(value)}`);
@@ -254,4 +320,47 @@ function asArray(value: unknown): unknown[] {
 
 function isDefined<T>(value: T | undefined): value is T {
   return value !== undefined;
+}
+
+/**
+ * Calculates geodesic distance between two WGS84 coordinates in meters
+ * using the Haversine formula on a sphere of mean radius 6,371,000 meters.
+ * Correctly accounts for antimeridian crossing by normalizing longitude delta to [-180, 180] deg.
+ */
+export function distanceBetweenCoordinates(
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number },
+): number {
+  const R = 6_371_000;
+  const toRad = Math.PI / 180;
+  const phi1 = a.latitude * toRad;
+  const phi2 = b.latitude * toRad;
+  const deltaPhi = (b.latitude - a.latitude) * toRad;
+
+  let deltaLonDeg = ((b.longitude - a.longitude) % 360);
+  if (deltaLonDeg > 180) deltaLonDeg -= 360;
+  if (deltaLonDeg < -180) deltaLonDeg += 360;
+  const deltaLambda = deltaLonDeg * toRad;
+
+  const sinHalfDeltaPhi = Math.sin(deltaPhi / 2);
+  const sinHalfDeltaLambda = Math.sin(deltaLambda / 2);
+  const h =
+    sinHalfDeltaPhi * sinHalfDeltaPhi +
+    Math.cos(phi1) * Math.cos(phi2) * sinHalfDeltaLambda * sinHalfDeltaLambda;
+  const clampedH = Math.min(1, Math.max(0, h));
+  return 2 * R * Math.asin(Math.sqrt(clampedH));
+}
+
+/**
+ * Sums consecutive points within each segment strictly.
+ * Gaps between distinct segments are not included in distance.
+ */
+export function calculateRouteDistanceMeters(document: RouteDocument): number {
+  let total = 0;
+  for (const segment of document.segments) {
+    for (let i = 0; i < segment.points.length - 1; i++) {
+      total += distanceBetweenCoordinates(segment.points[i]!, segment.points[i + 1]!);
+    }
+  }
+  return total;
 }

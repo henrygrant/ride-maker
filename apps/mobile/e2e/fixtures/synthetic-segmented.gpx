@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RideMaker" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Segmented Shoreline</name>
+    <desc>Synthetic segmented fixture with excluded gap</desc>
+  </metadata>
+  <trk>
+    <name>Segmented Shoreline</name>
+    <trkseg>
+      <trkpt lat="40.7000" lon="-74.0150" />
+      <trkpt lat="40.7045" lon="-74.0150" />
+    </trkseg>
+    <trkseg>
+      <trkpt lat="40.7150" lon="-74.0150" />
+      <trkpt lat="40.7195" lon="-74.0150" />
+    </trkseg>
+  </trk>
+</gpx>

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RideMaker" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Hudson Greenway Route</name>
+    <desc>Synthetic route import fixture</desc>
+  </metadata>
+  <rte>
+    <name>Hudson Greenway Route</name>
+    <rtept lat="40.7200" lon="-74.0120"><name>Pier 25</name></rtept>
+    <rtept lat="40.7260" lon="-74.0110"><name>Pier 40</name></rtept>
+    <rtept lat="40.7330" lon="-74.0100"><name>Meatpacking</name></rtept>
+    <rtept lat="40.7410" lon="-74.0090"><name>Chelsea Piers</name></rtept>
+  </rte>
+</gpx>

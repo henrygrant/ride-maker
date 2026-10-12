@@ -1,0 +1,15 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RideMaker BOM Test 🚴‍♀️" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>München Über Berg Straße — Café René</name>
+    <desc>Synthetic UTF-8 BOM and non-ASCII native fixture</desc>
+  </metadata>
+  <trk>
+    <name>München Über Berg Straße — Café René</name>
+    <trkseg>
+      <trkpt lat="48.1351" lon="11.5820"><ele>520.0</ele></trkpt>
+      <trkpt lat="48.1375" lon="11.5755"><ele>522.5</ele></trkpt>
+      <trkpt lat="48.1400" lon="11.5700"><ele>525.1</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

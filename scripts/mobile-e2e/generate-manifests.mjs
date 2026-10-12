@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
 import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const mode = process.argv[2];
 const outputFile = process.argv[3];
@@ -32,11 +37,48 @@ try {
       "RECEIVE_BOOT_COMPLETED",
     ];
 
+    // Read committed GPX fixture hashes
+    const gpxFixtures = [];
+    const fixturesDir = path.resolve(__dirname, "../../apps/mobile/e2e/fixtures");
+    if (fs.existsSync(fixturesDir)) {
+      for (const fname of fs.readdirSync(fixturesDir).sort()) {
+        const fpath = path.join(fixturesDir, fname);
+        if (fs.statSync(fpath).isFile()) {
+          const buf = fs.readFileSync(fpath);
+          gpxFixtures.push({
+            name: fname,
+            size: buf.length,
+            sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+          });
+        }
+      }
+    }
+
+    // Generated oversized fixture
+    let oversizedFixture = null;
+    const oversizedPath = process.env.MANIFEST_OVERSIZED_FIXTURE_PATH;
+    if (oversizedPath && fs.existsSync(oversizedPath)) {
+      const buf = fs.readFileSync(oversizedPath);
+      oversizedFixture = {
+        path: oversizedPath,
+        size: buf.length,
+        sha256: crypto.createHash("sha256").update(buf).digest("hex"),
+      };
+    }
+
+    const networkProbes = {
+      offlineProbe: process.env.MANIFEST_PROBE_OFFLINE || null,
+      restoredProbe: process.env.MANIFEST_PROBE_RESTORED || null,
+    };
+
     const isConsumer = process.env.MANIFEST_APK_VARIANT === "consumer";
     const fixtureBytes = isConsumer ? null : fs.readFileSync(new URL("../../apps/mobile/src/fixtures/synthetic-routes.json", import.meta.url));
     const fixture = fixtureBytes ? JSON.parse(fixtureBytes.toString()) : null;
     data = {
       fixture: fixture ? { id: fixture.id, schemaVersion: fixture.document.schemaVersion, sha256: crypto.createHash("sha256").update(fixtureBytes).digest("hex") } : null,
+      gpxFixtures,
+      oversizedFixture,
+      networkProbes,
       permissionSetup: isConsumer ? "consumer startup defaults" : { default: "grant fine/coarse/background location and notifications before launch", "04a-diagnostics-permission-denied": "revoke location/notifications, deny runtime prompt" },
       runId: process.env.MANIFEST_RUN_ID || "",
       startedAt: process.env.MANIFEST_STARTED_AT || new Date().toISOString(),

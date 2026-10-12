@@ -1,0 +1,172 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 0. Seed a healthy route through the real picker first
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "synthetic-track.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "synthetic-track.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "synthetic-track.gpx"
+
+# Verify healthy route loaded and saved
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Central Park Track"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "2.1 km"
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Central Park Track"
+
+# 1. Test picker cancellation - healthy route must survive
+- tapOn:
+    id: "button-import-gpx"
+- back
+- runFlow:
+    when:
+      notVisible:
+        id: "text-brand"
+    commands:
+      - back
+- runFlow:
+    when:
+      notVisible:
+        id: "text-brand"
+    commands:
+      - back
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Central Park Track"
+- assertNotVisible:
+    id: "banner-error"
+- takeScreenshot: 08-picker-canceled
+
+# 2. Test malformed GPX import - useful error feedback and healthy route survives
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "malformed-invalid-xml.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "malformed-invalid-xml.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "malformed-invalid-xml.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "malformed-invalid-xml.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "malformed-invalid-xml.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "malformed-invalid-xml.gpx"
+- assertVisible:
+    id: "banner-error"
+- assertVisible: ".*Invalid XML.*"
+- takeScreenshot: 08-malformed-gpx-error
+- tapOn:
+    id: "banner-error"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Central Park Track"
+
+# 3. Test oversized GPX import (> 10 MiB limit) - healthy route survives
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "malformed-oversized.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "malformed-oversized.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "malformed-oversized.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "malformed-oversized.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "malformed-oversized.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "malformed-oversized.gpx"
+- assertVisible:
+    id: "banner-error"
+- assertVisible: "The GPX file exceeds the 10 MiB limit."
+- takeScreenshot: 08-oversized-gpx-error
+- tapOn:
+    id: "banner-error"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Central Park Track"

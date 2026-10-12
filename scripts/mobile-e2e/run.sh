@@ -15,6 +15,7 @@
 # 9. Deterministic Maestro per-flow artifacts via --test-output-dir; assert checkpoints.
 # 10. Synchronized native GPS feed via exact observable UI state.
 # 11. Complete diagnostics verification (invariance check, dumpsys service/listener check).
+# 12. Local GPX import, persistence, and error handling verification (flows 06, 07, 08).
 # ==============================================================================
 
 set -euo pipefail
@@ -38,6 +39,7 @@ SERIAL=""
 BUILD_APK=false
 RUN_FAILURE_DEMO=false
 RUN_GPS_FAILURE_DEMO=false
+RUN_INEFFECTIVE_CUT_DEMO=false
 VERIFY_CONSUMER=false
 
 # Parse Arguments
@@ -50,7 +52,7 @@ while [[ $# -gt 0 ]]; do
       fi
       SERIAL="$2"
       shift 2
-      ;;
+      ;;\
     --build-apk)
       BUILD_APK=true
       shift
@@ -67,9 +69,13 @@ while [[ $# -gt 0 ]]; do
       RUN_GPS_FAILURE_DEMO=true
       shift
       ;;
+    --demo-ineffective-cut)
+      RUN_INEFFECTIVE_CUT_DEMO=true
+      shift
+      ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 --serial <emulator-serial> [--build-apk] [--verify-consumer] [--demo-failure] [--demo-gps-failure]" >&2
+      echo "Usage: $0 --serial <emulator-serial> [--build-apk] [--verify-consumer] [--demo-failure] [--demo-gps-failure] [--demo-ineffective-cut]" >&2
       exit 1
       ;;
   esac
@@ -205,12 +211,271 @@ REVERSE_OWNED=false
 TEST_APP_OWNED=false
 CONSUMER_APP_OWNED=false
 RUN_START_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+EMU_FIXTURE_DIR="/sdcard/Download/ride-maker-fixtures"
+FIXTURES_PUSHED=false
+NETWORK_MODIFIED=false
+
+# Capture initial network states for clean restoration
+INITIAL_AIRPLANE_MODE="$("$ADB" -s "$SERIAL" shell settings get global airplane_mode_on 2>/dev/null | tr -d "\r\n " || echo "0")"
+INITIAL_WIFI_STATE="$("$ADB" -s "$SERIAL" shell settings get global wifi_on 2>/dev/null | tr -d "\r\n " || echo "1")"
+INITIAL_DATA_STATE="$("$ADB" -s "$SERIAL" shell settings get global mobile_data 2>/dev/null | tr -d "\r\n " || echo "1")"
+
+verify_nc_available() {
+  local nc_check
+  nc_check="$("$ADB" -s "$SERIAL" shell "which nc 2>&1 || nc -h 2>&1" | tr -d "\r" || true)"
+  if [[ -z "$nc_check" ]] || echo "$nc_check" | grep -qiE "not found|inaccessible|permission denied"; then
+    echo "ERROR: nc (netcat) is not available or working on device ($SERIAL). Cannot reliably probe network." >&2
+    exit 1
+  fi
+}
+
+probe_endpoint() {
+  local host="$1"
+  local port="$2"
+  local req_path="$3"
+  local raw=""
+  local exit_code=0
+  raw="$("$ADB" -s "$SERIAL" shell "(echo -e \"GET ${req_path} HTTP/1.0\\r\\nHost: ${host}\\r\\n\\r\\n\"; sleep 1) | nc -w 2 ${host} ${port} 2>&1" | tr -d "\r")" || exit_code=$?
+  node "$SCRIPT_DIR/network-probe-classifier.mjs" classify "$exit_code" "$raw"
+}
+
+write_network_probes_json() {
+  local online_api="${1:-unknown}"
+  local online_ext="${2:-unknown}"
+  local offline_api="${3:-unknown}"
+  local offline_ext="${4:-unknown}"
+  local offline_ping="${5:-unknown}"
+  local restored_api="${6:-unknown}"
+  local restored_ext="${7:-unknown}"
+  local restored_ping="${8:-unknown}"
+
+  node -e '
+    const fs = require("fs");
+    const safeParse = (str) => {
+      try { return JSON.parse(str); } catch { return { raw: str }; }
+    };
+    const data = {
+      recordedAt: new Date().toISOString(),
+      onlineControl: {
+        api: safeParse(process.argv[1]),
+        external: safeParse(process.argv[2])
+      },
+      offlineCut: {
+        api: safeParse(process.argv[3]),
+        external: safeParse(process.argv[4]),
+        ping: process.argv[5],
+        isolated: safeParse(process.argv[3]).type === "CONNECTION_FAILURE" && safeParse(process.argv[4]).type === "CONNECTION_FAILURE"
+      },
+      restored: {
+        api: safeParse(process.argv[6]),
+        external: safeParse(process.argv[7]),
+        ping: process.argv[8],
+        restored: safeParse(process.argv[6]).type === "REACHABLE_HTTP" && safeParse(process.argv[6]).statusCode === 200
+      }
+    };
+    fs.writeFileSync(process.argv[9], JSON.stringify(data, null, 2));
+  ' "$online_api" "$online_ext" "$offline_api" "$offline_ext" "$offline_ping" "$restored_api" "$restored_ext" "$restored_ping" "$ARTIFACTS_DIR/network-probe-results.json"
+}
+
+cut_network() {
+  echo "[Network] Establishing positive online API/external control before network cut..."
+  verify_nc_available
+
+  local online_probe_log="$ARTIFACTS_DIR/network-probe-online.log"
+  echo "--- Network Probe (Online Control) ---" > "$online_probe_log"
+  local api_online
+  api_online="$(probe_endpoint "127.0.0.1" "${FIXTURE_PORT}" "/api/health")"
+  echo "API Online Probe: $api_online" >> "$online_probe_log"
+  local ext_online
+  ext_online="$(probe_endpoint "tiles.openfreemap.org" "80" "/")"
+  echo "External Online Probe: $ext_online" >> "$online_probe_log"
+  echo "[Network Probe Online Control] API: $(echo "$api_online" | tr "\n" " " | cut -c1-60) | Ext: $(echo "$ext_online" | tr "\n" " " | cut -c1-60)"
+
+  # Assert positive online control: API must be HTTP 200, Ext must be reachable HTTP
+  if ! node "$SCRIPT_DIR/network-probe-classifier.mjs" assert-online "$api_online" "$ext_online"; then
+    echo "ERROR: Positive online controls failed before network cut. Blocking non-zero." >&2
+    exit 1
+  fi
+
+  if [[ "$RUN_INEFFECTIVE_CUT_DEMO" == "true" ]]; then
+    echo "[Network Demo] Simulating deliberate ineffective network cut (network cut bypassed)..." >&2
+  else
+    echo "[Network] Cutting connectivity (airplane mode, wifi disabled, data disabled, remove reverse mapping)..."
+    NETWORK_MODIFIED=true
+    if [[ "$REVERSE_OWNED" == "true" ]]; then
+      "$ADB" -s "$SERIAL" reverse --remove "tcp:$FIXTURE_PORT" 2>/dev/null || true
+    fi
+    "$ADB" -s "$SERIAL" shell "cmd connectivity airplane-mode enable" 2>/dev/null || true
+    "$ADB" -s "$SERIAL" shell "svc wifi disable" 2>/dev/null || true
+    "$ADB" -s "$SERIAL" shell "svc data disable" 2>/dev/null || true
+    sleep 2
+  fi
+
+  local probe_log="$ARTIFACTS_DIR/network-probe-offline.log"
+  echo "--- Network Probe (Offline) ---" > "$probe_log"
+  local api_res
+  api_res="$(probe_endpoint "127.0.0.1" "${FIXTURE_PORT}" "/api/health")"
+  echo "API Probe: $api_res" >> "$probe_log"
+  local ext_res
+  ext_res="$(probe_endpoint "tiles.openfreemap.org" "80" "/")"
+  echo "External Probe: $ext_res" >> "$probe_log"
+  local ping_res
+  ping_res="$("$ADB" -s "$SERIAL" shell "ping -c 1 -W 2 8.8.8.8 2>&1" || echo "PING_FAILED")"
+  echo "Ping Probe: $(echo "$ping_res" | tr "\n" " " | cut -c1-60)" >> "$probe_log"
+  echo "[Network Probe Offline] API: $(echo "$api_res" | tr "\n" " " | cut -c1-60) | Ext: $(echo "$ext_res" | tr "\n" " " | cut -c1-60)"
+
+  write_network_probes_json "$api_online" "$ext_online" "$api_res" "$ext_res" "$ping_res" "{}" "{}" "pending"
+
+  # Isolation assertion: fail if endpoints remain reachable or if infra failure occurred
+  if ! node "$SCRIPT_DIR/network-probe-classifier.mjs" assert-offline "$api_res" "$ext_res"; then
+    echo "ERROR: Network cut ineffective or infrastructure failure detected." >&2
+    exit 1
+  fi
+
+  export MANIFEST_PROBE_OFFLINE="confirmed_offline"
+}
+
+restore_network() {
+  if [[ "$NETWORK_MODIFIED" != "true" ]]; then
+    return 0
+  fi
+  echo "[Network] Restoring connectivity to initial state..."
+  if [[ "$INITIAL_AIRPLANE_MODE" == "0" ]]; then
+    "$ADB" -s "$SERIAL" shell "cmd connectivity airplane-mode disable" 2>/dev/null || true
+  else
+    "$ADB" -s "$SERIAL" shell "cmd connectivity airplane-mode enable" 2>/dev/null || true
+  fi
+  if [[ "$INITIAL_WIFI_STATE" == "1" ]]; then
+    "$ADB" -s "$SERIAL" shell "svc wifi enable" 2>/dev/null || true
+  else
+    "$ADB" -s "$SERIAL" shell "svc wifi disable" 2>/dev/null || true
+  fi
+  if [[ "$INITIAL_DATA_STATE" == "1" ]]; then
+    "$ADB" -s "$SERIAL" shell "svc data enable" 2>/dev/null || true
+  else
+    "$ADB" -s "$SERIAL" shell "svc data disable" 2>/dev/null || true
+  fi
+
+  if [[ "$REVERSE_OWNED" == "true" ]]; then
+    "$ADB" -s "$SERIAL" reverse "tcp:$FIXTURE_PORT" "tcp:$FIXTURE_PORT" 2>/dev/null || true
+  fi
+  sleep 2
+
+  local curr_airplane
+  curr_airplane="$("$ADB" -s "$SERIAL" shell settings get global airplane_mode_on 2>/dev/null | tr -d "\r\n " || echo "unknown")"
+  local curr_wifi
+  curr_wifi="$("$ADB" -s "$SERIAL" shell settings get global wifi_on 2>/dev/null | tr -d "\r\n " || echo "unknown")"
+  local curr_data
+  curr_data="$("$ADB" -s "$SERIAL" shell settings get global mobile_data 2>/dev/null | tr -d "\r\n " || echo "unknown")"
+
+  local settings_match="true"
+  if [[ "$curr_airplane" != "$INITIAL_AIRPLANE_MODE" ]] || [[ "$curr_wifi" != "$INITIAL_WIFI_STATE" ]] || [[ "$curr_data" != "$INITIAL_DATA_STATE" ]]; then
+    echo "ERROR: Restored settings mismatch: airplane=$curr_airplane (init $INITIAL_AIRPLANE_MODE), wifi=$curr_wifi (init $INITIAL_WIFI_STATE), data=$curr_data (init $INITIAL_DATA_STATE)" >&2
+    settings_match="false"
+  fi
+
+  local probe_log="$ARTIFACTS_DIR/network-probe-restored.log"
+  echo "--- Network Probe (Restored) ---" > "$probe_log"
+  local api_res
+  api_res="$(probe_endpoint "127.0.0.1" "${FIXTURE_PORT}" "/api/health")"
+  echo "API Probe: $api_res" >> "$probe_log"
+  local ext_res
+  ext_res="$(probe_endpoint "tiles.openfreemap.org" "80" "/")"
+  echo "External Probe: $ext_res" >> "$probe_log"
+  local ping_res
+  ping_res="$("$ADB" -s "$SERIAL" shell "ping -c 1 -W 2 8.8.8.8 2>&1" || echo "PING_FAILED")"
+  echo "Ping Probe: $(echo "$ping_res" | tr "\n" " " | cut -c1-60)" >> "$probe_log"
+  echo "[Network Probe Restored] API: $(echo "$api_res" | tr "\n" " " | cut -c1-60) | Ext: $(echo "$ext_res" | tr "\n" " " | cut -c1-60)"
+
+  local prev_api_online="{}"
+  local prev_ext_online="{}"
+  local prev_api_off="{}"
+  local prev_ext_off="{}"
+  local prev_ping_off="unknown"
+  if [[ -f "$ARTIFACTS_DIR/network-probe-results.json" ]]; then
+    prev_api_online="$(node -e 'try{console.log(JSON.stringify(require(process.argv[1]).onlineControl.api))}catch{}' "$ARTIFACTS_DIR/network-probe-results.json")"
+    prev_ext_online="$(node -e 'try{console.log(JSON.stringify(require(process.argv[1]).onlineControl.external))}catch{}' "$ARTIFACTS_DIR/network-probe-results.json")"
+    prev_api_off="$(node -e 'try{console.log(JSON.stringify(require(process.argv[1]).offlineCut.api))}catch{}' "$ARTIFACTS_DIR/network-probe-results.json")"
+    prev_ext_off="$(node -e 'try{console.log(JSON.stringify(require(process.argv[1]).offlineCut.external))}catch{}' "$ARTIFACTS_DIR/network-probe-results.json")"
+    prev_ping_off="$(node -e 'try{console.log(require(process.argv[1]).offlineCut.ping)}catch{}' "$ARTIFACTS_DIR/network-probe-results.json")"
+  fi
+  write_network_probes_json "$prev_api_online" "$prev_ext_online" "$prev_api_off" "$prev_ext_off" "$prev_ping_off" "$api_res" "$ext_res" "$ping_res"
+
+  if ! node "$SCRIPT_DIR/network-probe-classifier.mjs" assert-restored "$api_res" "$settings_match"; then
+    echo "ERROR: Network restoration verification failed." >&2
+    return 1
+  fi
+
+  export MANIFEST_PROBE_RESTORED="confirmed_restored"
+  NETWORK_MODIFIED=false
+}
+
+capture_storage_observation() {
+  local tag="$1"
+  local output="$2"
+  local observation_pid
+  observation_pid="$("$ADB" -s "$SERIAL" shell pidof -s "$TEST_APP_ID" | tr -d '\r\n ')"
+  if [[ ! "$observation_pid" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: No current app process for storage observation." >&2
+    return 1
+  fi
+  "$ADB" -s "$SERIAL" shell am start -W -a android.intent.action.VIEW -d "ridemaker://observe-storage?tag=$tag" "$TEST_APP_ID" > "${output%.log}-intent.log"
+  for attempt in {1..120}; do
+    "$ADB" -s "$SERIAL" logcat -d --pid="$observation_pid" -v time > "$output"
+    if grep -Fq "[E2E_STORAGE_OBSERVE_ERROR] tag=\"$tag\"" "$output"; then
+      echo "ERROR: App storage observation failed; see $output." >&2
+      return 1
+    fi
+    if grep -Fq "[E2E_STORAGE_OBSERVE_END] tag=\"$tag\"" "$output"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "ERROR: Storage observation timed out; see $output." >&2
+  return 1
+}
+
+verify_native_persistence() {
+  local flow_out_dir="$1"
+  echo "Verifying native route storage and GPX fidelity on device via test observation..."
+  local persist_res_file="$ARTIFACTS_DIR/persistence-verification.json"
+  local before_log="$flow_out_dir/storage-observe-before.log"
+  local after_log="$flow_out_dir/storage-observe-after.log"
+
+  if [[ ! -f "$before_log" ]] || [[ ! -f "$after_log" ]]; then
+    echo "ERROR: Storage observation log files missing: before='$before_log', after='$after_log'" >&2
+    exit 1
+  fi
+
+  if ! node "$SCRIPT_DIR/verify-persistence.mjs" \
+    --before "$before_log" \
+    --after "$after_log" \
+    --fixtures-dir "$REPO_ROOT/apps/mobile/e2e/fixtures" \
+    --output "$persist_res_file"; then
+    echo "ERROR: Native persistence verification failed." >&2
+    exit 1
+  fi
+
+  cp "$persist_res_file" "$flow_out_dir/persistence-verification.json" 2>/dev/null || true
+  echo "Native persistence verification successfully passed."
+}
+
+check_fixture_collision() {
+  local existing
+  existing="$("$ADB" -s "$SERIAL" shell "ls -d $EMU_FIXTURE_DIR 2>/dev/null" | tr -d "\r\n " || true)"
+  if [[ -n "$existing" ]]; then
+    echo "ERROR: Fixture directory $EMU_FIXTURE_DIR already exists on device. Refusing collision." >&2
+    exit 1
+  fi
+}
 
 RUN_ID="run-$(date +%Y%m%d-%H%M%S)"
 if [[ "$RUN_FAILURE_DEMO" == "true" ]]; then
   RUN_ID="${RUN_ID}-failure-demo"
 elif [[ "$RUN_GPS_FAILURE_DEMO" == "true" ]]; then
   RUN_ID="${RUN_ID}-gps-failure-demo"
+elif [[ "$RUN_INEFFECTIVE_CUT_DEMO" == "true" ]]; then
+  RUN_ID="${RUN_ID}-ineffective-cut-demo"
 elif [[ "$VERIFY_CONSUMER" == "true" ]]; then
   RUN_ID="${RUN_ID}-consumer-verify"
 fi
@@ -235,6 +500,19 @@ cleanup() {
   fi
   if [[ "$CONSUMER_APP_OWNED" == "true" ]]; then
     "$ADB" -s "$SERIAL" shell am force-stop "$CONSUMER_APP_ID" 2>/dev/null || true
+  fi
+
+  # Restore connectivity to initial state
+  if ! restore_network; then
+    echo "ERROR: Network restoration failed during cleanup." >&2
+    if [[ $exit_code -eq 0 ]]; then
+      exit_code=1
+    fi
+  fi
+
+  # Delete owned fixtures directory ONLY
+  if [[ "$FIXTURES_PUSHED" == "true" ]]; then
+    "$ADB" -s "$SERIAL" shell "rm -rf $EMU_FIXTURE_DIR" 2>/dev/null || true
   fi
 
   # Kill owned background processes
@@ -271,6 +549,7 @@ cleanup() {
     [[ $exit_code -ge 128 ]] && status="interrupted"
     export MANIFEST_STATUS="$status" MANIFEST_EXIT_CODE="$exit_code"
     export MANIFEST_REASON="Process terminated prematurely (exit code $exit_code)"
+    node "$SCRIPT_DIR/generate-manifests.mjs" metadata "$ARTIFACTS_DIR/metadata.json" >/dev/null 2>&1 || true
     node "$SCRIPT_DIR/generate-manifests.mjs" summary "$ARTIFACTS_DIR/summary.json" >/dev/null 2>&1 || true
   fi
 
@@ -407,10 +686,9 @@ fi
 echo "[FixtureServer] Reverse forwarding tcp:$FIXTURE_PORT -> tcp:$FIXTURE_PORT on $SERIAL..."
 "$ADB" -s "$SERIAL" reverse "tcp:$FIXTURE_PORT" "tcp:$FIXTURE_PORT"
 REVERSE_OWNED=true
-
-# ---------------------------------------------------------
 fi
 
+# ---------------------------------------------------------
 # 6. Install Tested APK & Record Structured Metadata
 # ---------------------------------------------------------
 echo "[Install] Installing $TARGET_APK onto $SERIAL..."
@@ -495,6 +773,28 @@ revoke_all_permissions() {
   "$ADB" -s "$SERIAL" shell pm revoke "$TEST_APP_ID" android.permission.POST_NOTIFICATIONS 2>/dev/null || true
 }
 
+push_gpx_fixtures() {
+  echo "Setting up GPX test fixtures on emulator in owned directory $EMU_FIXTURE_DIR..."
+  "$ADB" -s "$SERIAL" shell "mkdir -p $EMU_FIXTURE_DIR"
+  FIXTURES_PUSHED=true
+
+  local gen_dir="$ARTIFACTS_DIR/generated-fixtures"
+  mkdir -p "$gen_dir"
+  local gen_oversized="$gen_dir/malformed-oversized.gpx"
+  if [[ ! -f "$gen_oversized" ]]; then
+    node -e 'const fs = require("fs"); fs.writeFileSync(process.argv[1], "x".repeat(10.5 * 1024 * 1024));' "$gen_oversized"
+  fi
+  export MANIFEST_OVERSIZED_FIXTURE_PATH="$gen_oversized"
+
+  for fix_file in "$REPO_ROOT/apps/mobile/e2e/fixtures"/* "$gen_oversized"; do
+    if [[ -f "$fix_file" ]]; then
+      local base_name="$(basename "$fix_file")"
+      "$ADB" -s "$SERIAL" push "$fix_file" "$EMU_FIXTURE_DIR/$base_name" >/dev/null 2>&1
+      "$ADB" -s "$SERIAL" shell "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file://$EMU_FIXTURE_DIR/$base_name" >/dev/null 2>&1
+    fi
+  done
+}
+
 # ---------------------------------------------------------
 # 7. Execute Test Flows with Explicit Artifact Directories
 # ---------------------------------------------------------
@@ -513,15 +813,67 @@ run_flow() {
   echo ""
   echo ">>> Running flow: $flow_name"
 
-  # Reset process and data state cleanly for test isolation
-  "$ADB" -s "$SERIAL" shell pm clear "$TEST_APP_ID" >/dev/null 2>&1 || true
-  sleep 1
+  # Reset process and data state cleanly for test isolation (except persistence flow 07)
+  if [[ "$flow_name" != "07-gpx-persistence-and-offline" ]]; then
+    "$ADB" -s "$SERIAL" shell pm clear "$TEST_APP_ID" >/dev/null 2>&1 || true
+    sleep 1
+  fi
 
   # Handle special permission conditions for flow 04a
   if [[ "$flow_name" == *"04a-diagnostics-permission-denied"* ]]; then
     revoke_all_permissions
   else
     grant_all_permissions
+  fi
+
+  # Prepare persistence & offline test state for flow 07
+  if [[ "$flow_name" == "07-gpx-persistence-and-offline" ]]; then
+    echo "Preparing self-contained persistence & offline test..."
+    # 1. Clean app state and grant permissions
+    "$ADB" -s "$SERIAL" shell pm clear "$TEST_APP_ID" >/dev/null 2>&1 || true
+    grant_all_permissions
+    sleep 1
+
+    # 2. Push fixtures to owned directory
+    push_gpx_fixtures
+
+    # 3. Launch app online and seed routes
+    echo "Seeding routes into app storage..."
+    "$ADB" -s "$SERIAL" shell am start -n "$TEST_APP_ID/.MainActivity" > "$flow_out_dir/seed-launch.log"
+    sleep 2
+    local seed_flow="$REPO_ROOT/apps/mobile/e2e/flows/07-seed-persistence.yaml"
+    set +e
+    "$MAESTRO" --device "$SERIAL" test --test-output-dir "$flow_out_dir/seed" "$seed_flow" > "$flow_out_dir/seed.log" 2>&1 &
+    MAESTRO_PID=$!
+    wait "$MAESTRO_PID"
+    local seed_status=$?
+    MAESTRO_PID=""
+    set -e
+    if [[ $seed_status -ne 0 ]]; then
+      echo "ERROR: Seed flow failed with exit code $seed_status." >&2
+      exit "$seed_status"
+    fi
+
+    # Trigger test observation before source removal & restart
+    echo "Triggering test storage observation (before)..."
+    capture_storage_observation "before" "$flow_out_dir/storage-observe-before.log"
+
+    # 4. Remove owned source fixtures from emulator Download directory
+    echo "Removing owned source fixtures from $EMU_FIXTURE_DIR..."
+    "$ADB" -s "$SERIAL" shell "rm -rf $EMU_FIXTURE_DIR/*"
+
+    # 5. Cut all network connectivity and verify offline via probes
+    cut_network
+
+    # 6. Force-stop the app process
+    echo "Force-stopping app process to verify disk persistence on restart..."
+    "$ADB" -s "$SERIAL" shell am force-stop "$TEST_APP_ID"
+    sleep 2
+  fi
+
+  # Re-push fixtures for flow 08 after flow 07 cleaned them up
+  if [[ "$flow_name" == "08-gpx-import-errors-and-cancel" ]]; then
+    push_gpx_fixtures
   fi
 
   # Start one process for this flow; Maestro keeps it alive with stopApp:false.
@@ -582,6 +934,15 @@ run_flow() {
   kill "$LOGCAT_PID" 2>/dev/null || true
   wait "$LOGCAT_PID" 2>/dev/null || true
   LOGCAT_PID=""
+
+  # Restore network if persistence flow just finished
+  if [[ "$flow_name" == "07-gpx-persistence-and-offline" ]]; then
+    echo "Triggering test storage observation (after)..."
+    capture_storage_observation "after" "$flow_out_dir/storage-observe-after.log"
+
+    verify_native_persistence "$flow_out_dir"
+    restore_network
+  fi
 
   # Take end-of-flow screenshot
   local end_shot="$ARTIFACTS_DIR/screenshots/${flow_name}-end.png"
@@ -649,6 +1010,30 @@ run_flow() {
         fi
       done
       ;;
+    06-gpx-import-and-preview)
+      for exp in 06-import-track-preview.png 06-import-route-preview.png 06-import-segmented-preview.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    07-gpx-persistence-and-offline)
+      for exp in 07-reopen-saved-route.png 07-reopen-second-saved-route.png 07-reopen-third-saved-route-bom.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    08-gpx-import-errors-and-cancel)
+      for exp in 08-picker-canceled.png 08-malformed-gpx-error.png 08-oversized-gpx-error.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
   esac
 
   if [[ $flow_status -eq 0 ]] && [[ "$feeder_failed" == "false" ]] && [[ "$missing_checkpoint" == "false" ]]; then
@@ -668,7 +1053,12 @@ if [[ "$RUN_FAILURE_DEMO" == "true" ]]; then
   DEMO_FAIL_FLOW="$FLOWS_DIR/failing-assertion-demo.yaml"
   run_flow "$DEMO_FAIL_FLOW"
 else
-  # Standard test suite execution: flows 01 through 05
+  # Check for pre-existing collision in owned fixture directory
+  check_fixture_collision
+  # Push initial GPX fixtures to emulator
+  push_gpx_fixtures
+
+  # Standard test suite execution: flows 01 through 08
   FLOWS=(
     "$FLOWS_DIR/01-startup-and-diagnostics.yaml"
     "$FLOWS_DIR/02-invalid-route.yaml"
@@ -676,6 +1066,9 @@ else
     "$FLOWS_DIR/04a-diagnostics-permission-denied.yaml"
     "$FLOWS_DIR/04-diagnostics-lifecycle.yaml"
     "$FLOWS_DIR/05-simulated-ride.yaml"
+    "$FLOWS_DIR/06-gpx-import-and-preview.yaml"
+    "$FLOWS_DIR/07-gpx-persistence-and-offline.yaml"
+    "$FLOWS_DIR/08-gpx-import-errors-and-cancel.yaml"
   )
 
   for flow in "${FLOWS[@]}"; do

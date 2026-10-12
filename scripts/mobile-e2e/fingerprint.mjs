@@ -97,7 +97,7 @@ const directories = [
 ];
 
 if (variant === "harness") {
-  directories.push(path.join(REPO_ROOT, "apps/mobile/e2e/flows"), path.join(REPO_ROOT, "scripts/mobile-e2e"));
+  directories.push(path.join(REPO_ROOT, "apps/mobile/e2e/flows"), path.join(REPO_ROOT, "apps/mobile/e2e/fixtures"), path.join(REPO_ROOT, "scripts/mobile-e2e"));
 }
 
 const allFiles = new Set();

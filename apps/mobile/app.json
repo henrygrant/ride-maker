@@ -32,6 +32,7 @@
     },
     "plugins": [
       "@maplibre/maplibre-react-native",
+      "expo-sqlite",
       [
         "expo-location",
         {

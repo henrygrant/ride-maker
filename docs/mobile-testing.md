@@ -39,7 +39,7 @@ The Expo example is a reference; EAS Workflows is not required for our local run
 
 ## Current baseline
 
-As of 2026-10-11 (Task 002 accepted emulator foundation):
+As of 2026-10-12 (Tasks 002 and 003 accepted Android emulator baseline):
 
 - The existing app opens shared routes, renders MapLibre, and provides foreground
   guidance using `Location.watchPositionAsync` in `App.tsx`.
@@ -64,12 +64,14 @@ As of 2026-10-11 (Task 002 accepted emulator foundation):
 - Six current-functionality flows passed three fresh runs; native GPS ride
   checkpoints and persisted post-stop invariance are independently reviewed.
   Consumer isolation and deliberate failure cases pass their expected checks.
-- Local GPX import, route preparation, durable offline storage, and full
-  pure-engine replay remain pending future tasks.
+- Local GPX import and durable route-data storage are accepted under task003:
+  native picker, segmented previews, errors/cancel and byte-exact original
+  persistence across cold restart with network blocked. Nine flows passed three
+  fresh runs. Route preparation, offline maps and pure-engine replay remain pending.
 
 ## Test layers and what they prove
 
-| Layer | Execution | Evidence and limitations |
+| Layer | Execution | Evidence and limitations |\
 | --- | --- | --- |
 | Pure logic | Vitest, no device | GPX validation, projection, maneuver order, cue deduplication, state transitions; no native guarantees |
 | Ride replay | Pure engine and selected app UI flows | Timestamped fixes produce expected progress/events/screens; injected fixes bypass native GPS |
@@ -133,7 +135,8 @@ storage, including access after restart, rather than only seeding parsed data.
 
 Repository layout:
 
-- `apps/mobile/e2e/flows/`: committed Maestro flows (startup, invalid route, saved route, diagnostics, simulated ride).
+- `apps/mobile/e2e/flows/`: committed Maestro flows (startup, invalid route, saved route, diagnostics, simulated ride, GPX import/preview, GPX persistence/offline, GPX import errors/cancel).
+- `apps/mobile/e2e/fixtures/`: committed standard GPX fixtures (`standard-track.gpx`, `standard-route.gpx`, `malformed-syntax.gpx`).
 - `apps/mobile/src/fixtures/`: canonical JSON fixtures (`synthetic-routes.json`) used by the controlled local API and fixture unit tests.
 - `scripts/mobile-e2e/`: Mac runner (`run.sh`), synchronized native GPS feeder (`feed-gps.sh`), diagnostics verifier (`feed-diagnostics-gps.sh`), fixture server (`fixture-server.mjs`), manifest validator (`generate-manifests.mjs`).
 - Pure replay tests beside the eventual `packages/navigation` engine.
@@ -154,7 +157,7 @@ pending now; an absent flow is not a pass.
 | --- | --- | --- |
 | Existing startup/shared route | Fixed route opens; native map renders; load error is actionable | Automated emulator flow plus screenshot review |
 | Diagnostics start/stop | Permission feedback; service starts; state persists; stop prevents later fixes/cues | Unit lifecycle tests, UI flow and native integration |
-| Local GPX import | Picker accepts track/route files; cancellation is harmless; malformed/oversized input gives a useful error | UI flows with real files; parser edge cases in unit tests (Pending) |
+| Local GPX import | Picker accepts track/route files; cancellation is harmless; malformed/oversized input gives a useful error | UI flows with real files (06-gpx-import-and-preview, 07-gpx-persistence-and-offline, 08-gpx-import-errors-and-cancel); parser and storage edge cases in unit tests |
 | Preparation | Original preserved; gaps/deviations visible; instructions/indexes valid; unavailable service handled | Controlled service responses, pure validation and opt-in integration (Pending) |
 | Active navigation | Next turn/progress update; cues occur once; off-route/rejoin and correct arrival | Replay assertions plus UI integration (Baseline native GPS verified; pure replay pending) |
 | Pause/resume/end | No guidance while paused; resume policy explicit; end stops location/audio | Replay, UI and native teardown checks (Pending) |
@@ -164,9 +167,13 @@ pending now; an absent flow is not a pass.
 | Screen lock/audio | Fixes and cues continue, stop succeeds, music/Bluetooth interruptions handled | Real 20-minute outing with counts/gaps, listening notes and battery delta (Pending task 001) |
 
 For offline checks, prove the API/network is unreachable and Metro is stopped;
-keep ADB connected for control if useful. Assert tile/style/font/sprite coverage
-as well as saved route data. Force-stop/relaunch is distinct from merely
-backgrounding the app. Do not promise navigation survives Android force-stop.
+keep ADB connected for control if useful. In task 003, real offline evidence cuts
+the device network via airplane mode, wifi/data disablement, and ADB reverse port removal.
+Device-side socket and ICMP ping probes verify unreachable status and record to
+`network-probe-offline.log`. Fixtures are managed within an owned folder
+`/sdcard/Download/ride-maker-fixtures/` without blanket deletion of user Downloads.
+Assert truthful UI status ("Saved route data is offline · foreground guidance only · maps require network"),
+persistence after force-stop, and local storage retry banner handling.
 
 ## Build, device, and agent execution
 

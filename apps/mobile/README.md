@@ -23,17 +23,20 @@ emulator harness, synthetic fixtures, standalone checks, and baseline verificati
 
 ### Automated End-to-End Tests (Maestro on Android Emulator)
 
-The mobile E2E test suite executes six automated flows against a dedicated Android emulator (`emulator-5554`):
+The mobile E2E test suite executes nine automated flows against a dedicated Android emulator (`emulator-5554`):
 1. **01 Startup & Diagnostics**: App launch, brand title verification, diagnostics entry/exit.
 2. **02 Invalid Route**: Invalid route ID entry, error banner assertion, tap dismissal.
 3. **03 Saved Route Navigation**: Synthetic route load, distance & map assertions, foreground navigation start/stop, voice mute toggle.
 4. **04a Permission Denied**: Deny foreground permission at Start and assert actionable error and IDLE state.
 5. **04 Diagnostics Lifecycle**: Background tracking start/stop, metrics accumulation, and state teardown back to IDLE.
 6. **05 Simulated Ride**: Real-time native GPS waypoint feeding via `feed-gps.sh`, driving Expo's location adapter through turn maneuvers, off-route detection (>50m), arrival, and navigation teardown.
+7. **06 GPX Import & Preview**: Import track, route, and segmented GPX files via Android DocumentPicker, assert truthful distance/name/guidance notice, wait for fully rendered native map.
+8. **07 GPX Persistence & Offline**: Self-contained flow verifying disk persistence across cold process restarts and device-wide network cut (airplane mode, disabled wifi/data, removed reverse mapping, verified by emulator probes).
+9. **08 GPX Import Errors & Cancellation**: Verifies existing healthy routes survive document picker cancellation, malformed XML errors, and >10 MiB limit rejections.
 
 To run the automated suite:
 ```bash
-# Run all six baseline E2E flows
+# Run all nine E2E flows
 ./scripts/mobile-e2e/run.sh --serial emulator-5554
 
 # Rebuild standalone APK before testing
@@ -77,7 +80,8 @@ cd apps/mobile && npx expo start --dev-client
 - **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
-  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`).
+  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`: 15 test files, 82 tests).
+  - All monorepo unit tests pass (`npm test`: 100 total unit tests across 17 test files in 8 packages).
   - Android native manifest includes required background permissions (`RECEIVE_BOOT_COMPLETED`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, and `POST_NOTIFICATIONS`).
   - Metro Android bundle export compiles cleanly to Hermes bytecode with module-scope background task registration.
 
@@ -220,3 +224,15 @@ This protocol tests Milestone 0 background feasibility (`docs/tasks/001-backgrou
   - Force quit / swipe the app away from recent apps.
   - Reopen Ride Maker.
   - Confirm the yellow **Interrupted Session Detected** banner is displayed and no spurious running state persists.
+
+## Local GPX imports
+
+Import a GPX through the native picker to preview its name, distance and separate
+segments. It saves automatically to app-private original/snapshot files and SQLite
+metadata and can reopen without network access. Limits are 10 MiB and 100,000
+geometry points. Imported tracks are preview-only until turn preparation lands;
+map tiles still require network. No account or upload is needed.
+
+Task003 acceptance and native persistence/network evidence are documented in
+[the task](../../docs/tasks/003-local-gpx-import.md) and
+[Sol review](../../docs/reviews/003-sol-local-gpx-review.md).

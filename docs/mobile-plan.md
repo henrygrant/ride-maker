@@ -9,8 +9,8 @@ evidence in this repository.
 
 The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
 [Task 002: E2E foundation](tasks/002-mobile-test-foundation.md) is accepted.
-Next is [task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md),
-before navigation engine implementation; the existing [background spike](tasks/001-background-spike.md)
+[Task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md) is accepted.
+Prepared-ride contracts and the navigation engine are next; the existing [background spike](tasks/001-background-spike.md)
 still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
@@ -42,7 +42,9 @@ navigating; report and recover interrupted sessions when it is reopened.
 - `apps/mobile` already uses Expo 57, React Native 0.86, MapLibre 11, foreground
   Expo Location, Expo Speech, and keep-awake. It can open shared route links and
   list public routes. It currently uses native React Native UI, not shared RSD.
-  It has no local GPX import, durable offline downloads, or background guidance.
+  It imports GPX files and preserves originals/snapshots in private storage with
+  SQLite metadata. Local imports reopen offline as previews. Turn preparation,
+  offline map downloads and background guidance remain pending.
   Its navigation helper and tests live in `apps/mobile/src/navigation.*`.
   Existing progress is clamped forward and ignores fix timestamps; replace those
   limitations through reviewed contracts, rather than treating it as field-ready.
@@ -200,7 +202,8 @@ task at a time with owned files, interfaces, acceptance checks, and escalation
 conditions. Gemini reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
-Current implementation task: [task 003](tasks/003-local-gpx-import.md), extending the existing mobile app. Do not independently change
+Task003 is accepted; the next bounded task will define prepared-ride and navigation
+engine contracts before implementation. Do not independently change
 architecture, schema versions, routing semantics, or production deployment.
 Escalate incompatibilities with evidence rather than installing unrelated
 libraries or repeatedly retrying a failing approach.

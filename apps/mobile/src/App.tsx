@@ -4,22 +4,47 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as Location from "expo-location";
 import * as Speech from "expo-speech";
+import * as DocumentPicker from "expo-document-picker";
 import { useKeepAwake } from "expo-keep-awake";
 import { Camera, GeoJSONSource, Layer, Map, type CameraRef } from "@maplibre/maplibre-react-native";
+import type { RouteDocument } from "@ride-maker/domain";
 import type { SavedRoute } from "@ride-maker/persistence";
 import { buildNavigationTrack, formatDistance, navigationFix, type NavigationFix } from "./navigation";
 import { routeGeometry, routeIdFromLink } from "./route-view";
 import { DiagnosticsView } from "./diagnostics/DiagnosticsView";
 import { FileSystemDiagnosticStorage } from "./diagnostics/file-storage";
 import { createDefaultRouteRepository } from "./route-repository";
+import {
+  createDefaultLocalStorage,
+  observeLocalStorage,
+  type LocalRouteRecord,
+} from "./storage";
+
+export type DisplayRoute = {
+  id: string;
+  slug?: string;
+  kind?: "local" | "remote";
+  distanceMeters?: number;
+  document: RouteDocument;
+};
 
 const repository = createDefaultRouteRepository();
 const diagnosticStorage = new FileSystemDiagnosticStorage();
 
+let defaultLocalStorage: ReturnType<typeof createDefaultLocalStorage> | null = null;
+function getLocalStorage() {
+  if (!defaultLocalStorage) {
+    defaultLocalStorage = createDefaultLocalStorage();
+  }
+  return defaultLocalStorage;
+}
+
 export default function App() {
   const [viewMode, setViewMode] = useState<"routes" | "diagnostics">("routes");
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
-  const [route, setRoute] = useState<SavedRoute | null>(null);
+  const [localStorageError, setLocalStorageError] = useState<string | null>(null);
+  const [localRoutes, setLocalRoutes] = useState<LocalRouteRecord[]>([]);
+  const [route, setRoute] = useState<DisplayRoute | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -35,8 +60,35 @@ export default function App() {
   const cameraRef = useRef<CameraRef>(null);
   const progressRef = useRef(0);
   const spokenRef = useRef(new Set<string>());
+  const importInProgressRef = useRef(false);
 
   const isTestMode = process.env.EXPO_PUBLIC_TEST_MODE === "true";
+
+  const emitTestObservation = useCallback(async (tag: string) => {
+    if (!isTestMode) return;
+    try {
+      const { storage, fs } = getLocalStorage();
+      const obs = await observeLocalStorage(storage, fs);
+      console.log(`[E2E_STORAGE_OBSERVE_BEGIN] tag="${tag}" count=${obs.count}`);
+      obs.routes.forEach((r, idx) => {
+        console.log(`[E2E_STORAGE_OBSERVE_ROUTE] ${JSON.stringify({ ...r, index: idx, total: obs.count, tag })}`);
+      });
+      console.log(`[E2E_STORAGE_OBSERVE_END] tag="${tag}" count=${obs.count}`);
+    } catch (err) {
+      console.error(`[E2E_STORAGE_OBSERVE_ERROR] tag="${tag}" error="${err instanceof Error ? err.message : String(err)}"`);
+    }
+  }, [isTestMode]);
+
+  const refreshLocalRoutes = useCallback(async () => {
+    try {
+      const { storage } = getLocalStorage();
+      const list = await storage.listRoutes();
+      setLocalRoutes(list);
+      setLocalStorageError(null);
+    } catch (cause) {
+      setLocalStorageError(cause instanceof Error ? cause.message : "Could not load saved routes.");
+    }
+  }, []);
 
   const openRoute = useCallback(async (id: string) => {
     setTestMapRendered(false);
@@ -44,10 +96,38 @@ export default function App() {
     setError(null);
     try {
       setNavigating(false);
-      setRoute(await repository.get(id));
+      const fetched = await repository.get(id);
+      setRoute({
+        id: fetched.id,
+        slug: fetched.slug,
+        kind: "remote",
+        document: fetched.document,
+      });
       setViewMode("routes");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load route.");
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const openLocalRoute = useCallback(async (id: string) => {
+    setTestMapRendered(false);
+    setBusy(true);
+    setError(null);
+    try {
+      setNavigating(false);
+      const { storage } = getLocalStorage();
+      const loaded = await storage.getRoute(id);
+      setRoute({
+        id: loaded.record.id,
+        kind: "local",
+        distanceMeters: loaded.record.distanceMeters,
+        document: loaded.document,
+      });
+      setViewMode("routes");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load saved route.");
     } finally {
       setBusy(false);
     }
@@ -57,17 +137,22 @@ export default function App() {
     setBusy(true);
     setError(null);
     try {
-      setRoutes(await repository.listPublic());
+      const [remoteList] = await Promise.all([
+        repository.listPublic(),
+        refreshLocalRoutes(),
+      ]);
+      setRoutes(remoteList);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load routes.");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [refreshLocalRoutes]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refreshLocalRoutes();
+    void repository.listPublic().then(setRoutes).catch(() => {});
+  }, [refreshLocalRoutes]);
 
   useEffect(() => {
     const handleUrl = (event: { url: string }) => {
@@ -77,6 +162,12 @@ export default function App() {
       }
       if (isTestMode && event.url === "ridemaker://test-verified") {
         setTestVerified(true);
+        return;
+      }
+      if (isTestMode && event.url.includes("observe-storage")) {
+        const tagMatch = event.url.match(/[?&]tag=([^&]+)/);
+        const tag = tagMatch && tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "default";
+        void emitTestObservation(tag);
         return;
       }
       const id = routeIdFromLink(event.url);
@@ -89,6 +180,12 @@ export default function App() {
           setTestVerified(true);
           return;
         }
+        if (isTestMode && url.includes("observe-storage")) {
+          const tagMatch = url.match(/[?&]tag=([^&]+)/);
+          const tag = tagMatch && tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "default";
+          void emitTestObservation(tag);
+          return;
+        }
         const id = routeIdFromLink(url);
         if (id) void openRoute(id);
       }
@@ -96,7 +193,51 @@ export default function App() {
     return () => {
       subscription.remove();
     };
-  }, [isTestMode, openRoute]);
+  }, [isTestMode, openRoute, emitTestObservation]);
+
+  const handleImportGpx = useCallback(async () => {
+    if (importInProgressRef.current) return;
+    importInProgressRef.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled || !result.assets || result.assets.length === 0) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      if (!asset) return;
+      const { importService, storage } = getLocalStorage();
+      const record = await importService.importFromUri(asset.uri, {
+        filename: asset.name,
+      });
+
+      const list = await storage.listRoutes();
+      setLocalRoutes(list);
+
+      // Open imported route in preview mode
+      const loaded = await storage.getRoute(record.id);
+      setTestMapRendered(false);
+      setNavigating(false);
+      setRoute({
+        id: loaded.record.id,
+        kind: "local",
+        distanceMeters: loaded.record.distanceMeters,
+        document: loaded.document,
+      });
+      setViewMode("routes");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to import GPX file.");
+    } finally {
+      importInProgressRef.current = false;
+      setBusy(false);
+    }
+  }, []);
 
   const openInput = useCallback(() => {
     const id = routeIdFromLink(input);
@@ -109,7 +250,7 @@ export default function App() {
 
   const geometry = useMemo(() => (route ? routeGeometry(route.document) : null), [route]);
   const track = useMemo(() => (route ? buildNavigationTrack(route.document) : null), [route]);
-  const distance = route?.document.summary?.distanceMeters;
+  const distance = route?.distanceMeters ?? route?.document.summary?.distanceMeters;
 
   const stopNavigation = useCallback(() => {
     setNavigating(false);
@@ -276,6 +417,13 @@ export default function App() {
               <Text testID="text-route-title" style={styles.routeTitle}>{route.document.name}</Text>
               {typeof distance === "number" && <Text testID="text-route-distance" style={styles.muted}>{(distance / 1000).toFixed(1)} km</Text>}
             </View>
+            {route.kind === "local" && (
+              <View testID="view-guidance-notice" style={styles.guidanceNotice}>
+                <Text testID="text-guidance-notice" style={styles.guidanceNoticeText}>
+                  Route saved. Turn-by-turn guidance is coming next.
+                </Text>
+              </View>
+            )}
             {navigating && <View testID="view-guidance" style={styles.guidance}>
               <Text style={styles.guidanceDistance}>
                 {poorGps ? "Waiting for accurate GPS" : offRoute ? "Off route" : fix?.arrived ? "Arrived" : !fix ? "Locating…" : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters)}
@@ -287,7 +435,13 @@ export default function App() {
             </View>}
             {isTestMode && testMapRendered && <Text testID="test-map-rendered">MAP_RENDERED</Text>}
             <View testID="view-map" style={styles.mapContainer}>
-              <Map mapStyle="https://tiles.openfreemap.org/styles/liberty" style={styles.map} onDidFinishRenderingMapFully={isTestMode ? () => setTestMapRendered(true) : undefined}>
+              <Map
+                mapStyle="https://tiles.openfreemap.org/styles/liberty"
+                style={styles.map}
+                onDidFinishRenderingMapFully={() => {
+                  if (isTestMode) setTestMapRendered(true);
+                }}
+              >
                 <Camera
                   key={route.id}
                   ref={cameraRef}
@@ -303,18 +457,39 @@ export default function App() {
                 </GeoJSONSource>}
               </Map>
             </View>
-            <View style={styles.navigationBar}>
-              {navigating && <Pressable testID="button-voice-toggle" accessibilityRole="button" accessibilityLabel={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"} onPress={() => setVoiceEnabled((value) => !value)} style={styles.voiceButton}><Text style={styles.action}>{voiceEnabled ? "Mute" : "Unmute"}</Text></Pressable>}
-              <Pressable testID="button-navigation-toggle" accessibilityRole="button" accessibilityLabel={navigating ? "Stop navigation" : "Start navigation"} onPress={() => navigating ? stopNavigation() : void startNavigation()} style={[styles.button, styles.navigationButton]}>
-                <Text style={styles.buttonText}>{navigating ? "Stop navigation" : "Start navigation"}</Text>
-              </Pressable>
-            </View>
-            <Text style={styles.footer}>Foreground guidance only · maps require network</Text>
+            {route.kind !== "local" && (
+              <View style={styles.navigationBar}>
+                {navigating && <Pressable testID="button-voice-toggle" accessibilityRole="button" accessibilityLabel={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"} onPress={() => setVoiceEnabled((value) => !value)} style={styles.voiceButton}><Text style={styles.action}>{voiceEnabled ? "Mute" : "Unmute"}</Text></Pressable>}
+                <Pressable testID="button-navigation-toggle" accessibilityRole="button" accessibilityLabel={navigating ? "Stop navigation" : "Start navigation"} onPress={() => navigating ? stopNavigation() : void startNavigation()} style={[styles.button, styles.navigationButton]}>
+                  <Text style={styles.buttonText}>{navigating ? "Stop navigation" : "Start navigation"}</Text>
+                </Pressable>
+              </View>
+            )}
+            <Text style={styles.footer}>
+              {route.kind === "local"
+                ? "Saved route data is offline · foreground guidance only · maps require network"
+                : "Foreground guidance only · maps require network"}
+            </Text>
           </>
         ) : viewMode === "diagnostics" ? (
           <DiagnosticsView testVerified={testVerified} testSamplesReady={testSamplesReady} onClearVerification={() => { setTestVerified(false); setTestSamplesReady(false); }} />
         ) : (
           <>
+            <View style={styles.importArea}>
+              <Pressable
+                testID="button-import-gpx"
+                accessibilityRole="button"
+                accessibilityLabel="Import GPX"
+                onPress={() => void handleImportGpx()}
+                style={[styles.button, styles.importButton]}
+              >
+                <Text style={styles.buttonText}>Import GPX file</Text>
+              </Pressable>
+            </View>
+            {localStorageError && <View testID="banner-storage-error" style={styles.inputArea}>
+              <Text>{localStorageError}</Text>
+              <Pressable testID="button-retry-saved-routes" accessibilityRole="button" accessibilityLabel="Retry saved routes" onPress={() => void refreshLocalRoutes()}><Text style={styles.action}>Retry</Text></Pressable>
+            </View>}
             <View style={styles.inputArea}>
               <Text style={styles.sectionTitle}>Open a route</Text>
               <TextInput
@@ -331,6 +506,31 @@ export default function App() {
               />
               <Pressable testID="button-view-route" accessibilityRole="button" accessibilityLabel="View route" onPress={openInput} style={styles.button}><Text style={styles.buttonText}>View route</Text></Pressable>
             </View>
+            <View style={styles.listHeader}>
+              <Text testID="text-local-routes-section" style={styles.sectionTitle}>Saved routes</Text>
+              <Pressable onPress={() => void refreshLocalRoutes()}><Text style={styles.action}>Refresh</Text></Pressable>
+            </View>
+            <FlatList
+              data={localRoutes}
+              keyExtractor={(item) => item.id}
+              scrollEnabled={false}
+              ListEmptyComponent={<Text style={styles.empty}>No saved routes yet. Import a GPX file above.</Text>}
+              renderItem={({ item }) => (
+                <Pressable
+                  testID={`button-open-local-route-${item.id}`}
+                  onPress={() => void openLocalRoute(item.id)}
+                  style={styles.routeRow}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.routeName}>{item.name}</Text>
+                    {typeof item.distanceMeters === "number" && (
+                      <Text style={styles.muted}>{(item.distanceMeters / 1000).toFixed(1)} km</Text>
+                    )}
+                  </View>
+                  <Text style={styles.action}>View →</Text>
+                </Pressable>
+              )}
+            />
             <View style={styles.listHeader}>
               <Text style={styles.sectionTitle}>Public routes</Text>
               <Pressable onPress={() => void refresh()}><Text style={styles.action}>Refresh</Text></Pressable>
@@ -379,6 +579,8 @@ const styles = StyleSheet.create({
   routeHeader: { paddingHorizontal: 20, paddingVertical: 14, gap: 3 },
   routeTitle: { color: "#1b2521", fontSize: 22, fontWeight: "700" },
   muted: { color: "#69736f", fontSize: 14 },
+  guidanceNotice: { backgroundColor: "#eef6f2", paddingHorizontal: 20, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: "#cce5d6" },
+  guidanceNoticeText: { color: "#1b5e3b", fontSize: 14, fontWeight: "600" },
   guidance: { backgroundColor: "#28312d", paddingHorizontal: 20, paddingVertical: 14, gap: 3 },
   guidanceDistance: { color: "#fff", fontSize: 28, fontWeight: "800" },
   guidanceInstruction: { color: "#fff", fontSize: 17, fontWeight: "600" },
@@ -388,18 +590,20 @@ const styles = StyleSheet.create({
   navigationBar: { flexDirection: "row", padding: 12, alignItems: "center", gap: 12 },
   navigationButton: { flex: 1 },
   voiceButton: { paddingHorizontal: 10, paddingVertical: 12 },
-  footer: { paddingBottom: 10, color: "#69736f", textAlign: "center", fontSize: 12 },
-  inputArea: { padding: 20, gap: 12 },
+  button: { backgroundColor: "#ec4b35", paddingHorizontal: 16, paddingVertical: 12, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  buttonText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  action: { color: "#ec4b35", fontSize: 14, fontWeight: "600" },
+  importArea: { paddingHorizontal: 20, paddingTop: 16 },
+  importButton: { backgroundColor: "#1b2521" },
+  inputArea: { padding: 20, gap: 10 },
   sectionTitle: { fontSize: 16, fontWeight: "700", color: "#1b2521" },
-  input: { borderWidth: 1, borderColor: "#d8d3c9", borderRadius: 8, backgroundColor: "#fff", padding: 13, fontSize: 15 },
-  button: { backgroundColor: "#ec4b35", borderRadius: 8, padding: 13, alignItems: "center" },
-  buttonText: { color: "#fff", fontWeight: "700", fontSize: 15 },
-  listHeader: { paddingHorizontal: 20, paddingVertical: 12, flexDirection: "row", justifyContent: "space-between" },
-  action: { color: "#ec4b35", fontWeight: "600" },
-  routeRow: { marginHorizontal: 20, paddingVertical: 17, borderBottomColor: "#ddd9d0", borderBottomWidth: 1, flexDirection: "row", justifyContent: "space-between" },
-  routeName: { color: "#1b2521", fontSize: 16, fontWeight: "600" },
-  empty: { color: "#69736f", lineHeight: 20, paddingHorizontal: 20, paddingTop: 8 },
-  loading: { position: "absolute", right: 20, top: 70, padding: 8, backgroundColor: "#fff", borderRadius: 20 },
-  error: { position: "absolute", bottom: 20, left: 20, right: 20, backgroundColor: "#28312d", borderRadius: 8, padding: 14 },
-  errorText: { color: "#fff" },
+  input: { backgroundColor: "#fff", borderWidth: 1, borderColor: "#ddd9d0", borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
+  listHeader: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 6, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  routeRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 20, paddingVertical: 14, backgroundColor: "#fff", borderBottomWidth: 1, borderBottomColor: "#ede9e0" },
+  routeName: { fontSize: 16, fontWeight: "600", color: "#1b2521" },
+  empty: { padding: 20, textAlign: "center", color: "#69736f", fontStyle: "italic" },
+  loading: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(255,255,255,0.7)", alignItems: "center", justifyContent: "center" },
+  error: { margin: 20, padding: 12, backgroundColor: "#fde8e8", borderRadius: 8, borderWidth: 1, borderColor: "#f8b4b4" },
+  errorText: { color: "#9b1c1c", fontSize: 14 },
+  footer: { padding: 12, textAlign: "center", fontSize: 12, color: "#69736f", backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#ddd9d0" },
 });

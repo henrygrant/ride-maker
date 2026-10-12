@@ -1,0 +1,91 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 1. Reopen first saved route from app-private storage (with picker files removed and offline)
+- assertVisible: "Central Park Track"
+- tapOn: "Central Park Track"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Central Park Track"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "2.1 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible:
+    id: "view-map"
+- assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 10000
+    optional: true
+- takeScreenshot: 07-reopen-saved-route
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+
+# 2. Reopen second saved route from app-private storage
+- assertVisible: "Hudson Greenway Route"
+- tapOn: "Hudson Greenway Route"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Hudson Greenway Route"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "2.3 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible:
+    id: "view-map"
+- assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 10000
+    optional: true
+- takeScreenshot: 07-reopen-second-saved-route
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+
+# 3. Reopen third saved route (UTF-8 BOM and non-ASCII München Über Berg Straße — Café René)
+- assertVisible: "München Über Berg Straße — Café René"
+- tapOn: "München Über Berg Straße — Café René"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "München Über Berg Straße — Café René"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "1.0 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible:
+    id: "view-map"
+- assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 10000
+    optional: true
+- takeScreenshot: 07-reopen-third-saved-route-bom
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"

@@ -1,0 +1,196 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 1. Import normal track GPX fixture
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "synthetic-track.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "synthetic-track.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-track.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "synthetic-track.gpx"
+
+# Verify track preview screen
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Central Park Track"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "2.1 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertNotVisible:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "view-map"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 30000
+- takeScreenshot: 06-import-track-preview
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Central Park Track"
+
+# 2. Import normal route GPX fixture
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "synthetic-route.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "synthetic-route.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-route.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "synthetic-route.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-route.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "synthetic-route.gpx"
+
+# Verify route preview screen
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Hudson Greenway Route"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "2.3 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertNotVisible:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "view-map"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 30000
+- takeScreenshot: 06-import-route-preview
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Hudson Greenway Route"
+
+# 3. Import segmented GPX fixture (verifying gap exclusion in distance)
+- tapOn:
+    id: "button-import-gpx"
+- runFlow:
+    when:
+      notVisible: "synthetic-segmented.gpx"
+    commands:
+      - scrollUntilVisible:
+          element: "synthetic-segmented.gpx"
+          direction: DOWN
+          timeout: 1500
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-segmented.gpx"
+          direction: UP
+          timeout: 1500
+          optional: true
+- runFlow:
+    when:
+      notVisible: "synthetic-segmented.gpx"
+    commands:
+      - tapOn:
+          text: "Show roots"
+          optional: true
+      - tapOn:
+          text: "Downloads"
+          optional: true
+      - tapOn:
+          text: "ride-maker-fixtures"
+          optional: true
+      - scrollUntilVisible:
+          element: "synthetic-segmented.gpx"
+          direction: DOWN
+          timeout: 5000
+          optional: true
+- tapOn: "synthetic-segmented.gpx"
+
+# Verify segmented route preview screen
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Segmented Shoreline"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible: "1.0 km"
+- assertVisible:
+    id: "text-guidance-notice"
+- assertVisible:
+    id: "view-map"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 30000
+- takeScreenshot: 06-import-segmented-preview
+
+# Back to main routes screen
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Segmented Shoreline"
