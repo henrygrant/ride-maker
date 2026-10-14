@@ -460,5 +460,158 @@ describe("CreateRideController", () => {
       expect(ctrl.getState().startPoint.name).toBe("Central Park Loop");
       expect(ctrl.getState().startPoint.latitude).toBe(40.785);
     });
+
+    it("GPS completing or replacing finish/start triggers automatic routing", async () => {
+      const ctrl = new CreateRideController(mockGeocoding, mockRouting, null, { autoRoute: true });
+      ctrl.selectSearchResult("start", sampleStartResult);
+      expect(ctrl.getState().previewRoute).toBeNull();
+
+      // GPS sets finish
+      await ctrl.useMyLocation("finish", async () => ({
+        latitude: 40.795,
+        longitude: -73.955,
+      }));
+
+      expect(mockRouting.route).toHaveBeenCalled();
+      expect(ctrl.getState().previewRoute).not.toBeNull();
+      expect(ctrl.canSave()).toBe(true);
+      expect(ctrl.canUndo()).toBe(true);
+    });
+
+    it("delayed GPS and reverse geocode after Undo does not alter state or history", async () => {
+      let resolveLocation!: (loc: { latitude: number; longitude: number } | null) => void;
+      const locationPromise = new Promise<{ latitude: number; longitude: number } | null>((r) => {
+        resolveLocation = r;
+      });
+
+      const ctrl = new CreateRideController(mockGeocoding, mockRouting, null, { autoRoute: true });
+      ctrl.selectSearchResult("start", sampleStartResult);
+      ctrl.selectSearchResult("finish", sampleFinishResult);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(ctrl.getState().previewRoute).not.toBeNull();
+      const initialSnapshot = ctrl.getDraftSnapshot();
+
+      // Start useMyLocation on finish point
+      const locPromise = ctrl.useMyLocation("finish", () => locationPromise);
+
+      // User hits Undo before GPS resolves
+      expect(ctrl.undo()).toBe(true);
+      expect(ctrl.getState().finishPoint.latitude).toBeNull();
+
+      // GPS completes delayed
+      resolveLocation({ latitude: 40.81, longitude: -73.94 });
+      await locPromise;
+
+      // Point must remain unchanged (null), undo stack must not receive unwanted entry
+      expect(ctrl.getState().finishPoint.latitude).toBeNull();
+      expect(ctrl.getState().finishPoint.name).toBe("");
+    });
+
+    it("two same-point GPS requests out of order preserve pending guard until latest finishes", async () => {
+      let resolveFirst!: (loc: { latitude: number; longitude: number } | null) => void;
+      let resolveSecond!: (loc: { latitude: number; longitude: number } | null) => void;
+      const firstPromise = new Promise<{ latitude: number; longitude: number } | null>((r) => {
+        resolveFirst = r;
+      });
+      const secondPromise = new Promise<{ latitude: number; longitude: number } | null>((r) => {
+        resolveSecond = r;
+      });
+
+      const ctrl = new CreateRideController(mockGeocoding, mockRouting, null, { autoRoute: true });
+      ctrl.selectSearchResult("start", sampleStartResult);
+
+      // First GPS request begins
+      const p1 = ctrl.useMyLocation("finish", () => firstPromise);
+      expect(ctrl.canRoute()).toBe(false);
+
+      // Second GPS request begins for same point
+      const p2 = ctrl.useMyLocation("finish", () => secondPromise);
+      expect(ctrl.canRoute()).toBe(false);
+
+      // First (superseded) request finishes
+      resolveFirst({ latitude: 40.801, longitude: -73.951 });
+      await p1;
+
+      // Pending guard must STILL be active because second request is still in-flight
+      expect(ctrl.canRoute()).toBe(false);
+
+      // Second request completes
+      resolveSecond({ latitude: 40.805, longitude: -73.955 });
+      await p2;
+
+      // Now pending is cleared, routing completes
+      expect(ctrl.canRoute()).toBe(true);
+      expect(ctrl.getState().finishPoint.latitude).toBe(40.805);
+    });
+
+    it("transactional cancel new stop and undo new stop restore exact original points and preview/save readiness", async () => {
+      const ctrl = new CreateRideController(mockGeocoding, mockRouting, null, { autoRoute: true });
+      ctrl.selectSearchResult("start", sampleStartResult);
+      ctrl.selectSearchResult("finish", sampleFinishResult);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(ctrl.canSave()).toBe(true);
+      const originalSnapshot = ctrl.getDraftSnapshot();
+      const undoCountBefore = (ctrl as any).undoStack.length;
+
+      // 1. Enter placement for a new stop
+      ctrl.startMapPlacement("new-stop");
+      ctrl.setCandidateCoordinate({ latitude: 40.788, longitude: -73.962 });
+      expect(ctrl.getState().placementTarget?.pointId).toBe("new-stop");
+      expect(ctrl.getState().viaStops).toHaveLength(0);
+
+      // Cancel placement
+      ctrl.cancelMapPlacement();
+      expect(ctrl.getState().placementTarget).toBeNull();
+      expect(ctrl.getState().viaStops).toHaveLength(0);
+      expect((ctrl as any).undoStack.length).toBe(undoCountBefore);
+      // Intact itinerary and ready preview/save
+      expect(ctrl.canSave()).toBe(true);
+      expect(ctrl.getState().previewRoute).toEqual(originalSnapshot.previewRoute);
+
+      // 2. Now confirm a new stop
+      ctrl.startMapPlacement("new-stop");
+      ctrl.setCandidateCoordinate({ latitude: 40.788, longitude: -73.962 });
+      await ctrl.confirmMapPlacement();
+
+      expect(ctrl.getState().viaStops).toHaveLength(1);
+      expect(ctrl.getState().viaStops[0]?.latitude).toBe(40.788);
+      expect(ctrl.canUndo()).toBe(true);
+
+      // 3. Undo the confirmed new stop
+      expect(ctrl.undo()).toBe(true);
+      expect(ctrl.getState().viaStops).toHaveLength(0);
+      // Exact original points and save readiness restored
+      expect(ctrl.getState().startPoint.latitude).toBe(originalSnapshot.startPoint.latitude);
+      expect(ctrl.getState().finishPoint.latitude).toBe(originalSnapshot.finishPoint.latitude);
+      expect(ctrl.canSave()).toBe(true);
+    });
+
+    it("reopening draft with deleted stops derives maxnumericID+1 and assigns unique IDs", () => {
+      // Simulate restored draft where stop-1 was deleted, leaving stop-0 and stop-2
+      const initialDraft = {
+        name: "Restored Ride",
+        startPoint: { ...sampleStartResult, kind: "start", searchQuery: "Central Park", searchResults: [], isSearching: false, searchError: null },
+        finishPoint: { ...sampleFinishResult, kind: "finish", searchQuery: "Harlem", searchResults: [], isSearching: false, searchError: null },
+        viaStops: [
+          { id: "stop-0", kind: "via", name: "Stop 1", latitude: 40.78, longitude: -73.96, searchQuery: "Stop 1", searchResults: [], isSearching: false, searchError: null },
+          { id: "stop-2", kind: "via", name: "Stop 3", latitude: 40.79, longitude: -73.95, searchQuery: "Stop 3", searchResults: [], isSearching: false, searchError: null },
+        ],
+        isLoop: false,
+        previewRoute: null,
+        previewInputSnapshot: null,
+        editGeneration: 1,
+      };
+
+      const ctrl = new CreateRideController(mockGeocoding, mockRouting, initialDraft as any);
+      const newStopId = ctrl.addViaStop();
+
+      // Must be stop-3, NOT stop-2 (which would collide with the existing stop-2)
+      expect(newStopId).toBe("stop-3");
+      const ids = ctrl.getState().viaStops.map((s) => s.id);
+      expect(ids).toEqual(["stop-0", "stop-2", "stop-3"]);
+      expect(new Set(ids).size).toBe(3);
+    });
   });
 });

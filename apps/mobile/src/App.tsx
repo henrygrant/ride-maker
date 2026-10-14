@@ -460,7 +460,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <SafeAreaView style={styles.screen}>
+      <SafeAreaView style={styles.screen} edges={viewMode === "create" ? [] : ["top", "bottom", "left", "right"]}>
         {!route && viewMode !== "create" && <View style={styles.header}>
           <Text testID="text-brand" style={styles.brand}>My rides</Text>
           {isTestMode && <Text testID="badge-test-mode" style={styles.testBadge}>TEST MODE</Text>}

@@ -25,13 +25,16 @@ export interface CreateRideState {
   finishPoint: DraftPointState;
   viaStops: DraftPointState[];
   isLoop: boolean;
+  newStopSearch: DraftPointState;
   placementTarget: { pointId: string; label: string } | null;
   candidateCoordinate: Coordinate | null;
   isRouting: boolean;
   previewRoute: RoutedPath | null;
+  stalePreviewRoute: RoutedPath | null;
   previewInputSnapshot: ControlPoint[] | null;
   error: string | null;
   editGeneration: number;
+  canUndo: boolean;
 }
 
 export type ControllerState = CreateRideState;
@@ -47,6 +50,38 @@ export interface ControllerDraftSnapshot {
   editGeneration: number;
 }
 
+export interface CreateRideControllerOptions {
+  autoRoute?: boolean;
+}
+
+function deriveNextStopSeq(viaStops: Array<{ id: string }>): number {
+  let maxSeq = 0;
+  for (const stop of viaStops) {
+    const match = /^stop-(\d+)$/.exec(stop.id);
+    if (match && match[1]) {
+      const num = parseInt(match[1], 10);
+      if (Number.isFinite(num)) {
+        maxSeq = Math.max(maxSeq, num + 1);
+      }
+    }
+  }
+  return maxSeq;
+}
+
+function createInitialNewStopSearch(): DraftPointState {
+  return {
+    id: "new-stop",
+    kind: "via",
+    name: "",
+    searchQuery: "",
+    searchResults: [],
+    isSearching: false,
+    searchError: null,
+    latitude: null,
+    longitude: null,
+  };
+}
+
 export class CreateRideController {
   private geocodingProvider: GeocodingProvider;
   private routingProvider: RoutingProvider;
@@ -57,14 +92,17 @@ export class CreateRideController {
   private pointGenerations = new Map<string, number>();
   private reverseAbortControllers = new Map<string, AbortController>();
   private routingAbortController: AbortController | null = null;
-  private pendingReplacements = new Set<string>();
+  private pendingReplacements = new Map<string, number>();
+  private undoStack: ControllerDraftSnapshot[] = [];
   private nextStopSeq = 0;
   private disposed = false;
+  private autoRouteEnabled = false;
 
   constructor(
     arg1: GeocodingProvider | RoutingProvider,
     arg2: GeocodingProvider | RoutingProvider,
     initialDraft?: ControllerDraftSnapshot | null,
+    options?: CreateRideControllerOptions,
   ) {
     if ("route" in arg1 && "search" in arg2) {
       this.routingProvider = arg1 as RoutingProvider;
@@ -74,6 +112,8 @@ export class CreateRideController {
       this.routingProvider = arg2 as RoutingProvider;
     }
 
+    this.autoRouteEnabled = options?.autoRoute ?? false;
+
     if (initialDraft) {
       this.state = {
         name: initialDraft.name,
@@ -81,15 +121,18 @@ export class CreateRideController {
         finishPoint: { ...initialDraft.finishPoint, searchResults: [] },
         viaStops: initialDraft.viaStops.map((s) => ({ ...s, searchResults: [] })),
         isLoop: initialDraft.isLoop,
+        newStopSearch: createInitialNewStopSearch(),
         placementTarget: null,
         candidateCoordinate: null,
         isRouting: false,
         previewRoute: initialDraft.previewRoute,
+        stalePreviewRoute: null,
         previewInputSnapshot: initialDraft.previewInputSnapshot,
         error: null,
         editGeneration: initialDraft.editGeneration ?? 0,
+        canUndo: false,
       };
-      this.nextStopSeq = initialDraft.viaStops.length;
+      this.nextStopSeq = deriveNextStopSeq(initialDraft.viaStops);
     } else {
       this.state = {
         name: "New Ride",
@@ -117,18 +160,23 @@ export class CreateRideController {
         },
         viaStops: [],
         isLoop: false,
+        newStopSearch: createInitialNewStopSearch(),
         placementTarget: null,
         candidateCoordinate: null,
         isRouting: false,
         previewRoute: null,
+        stalePreviewRoute: null,
         previewInputSnapshot: null,
         error: null,
         editGeneration: 0,
+        canUndo: false,
       };
+      this.nextStopSeq = 0;
     }
 
     this.pointGenerations.set("start", 0);
     this.pointGenerations.set("finish", 0);
+    this.pointGenerations.set("new-stop", 0);
     for (const stop of this.state.viaStops) {
       this.pointGenerations.set(stop.id, 0);
     }
@@ -149,6 +197,8 @@ export class CreateRideController {
       this.routingAbortController.abort();
       this.routingAbortController = null;
     }
+    this.undoStack = [];
+    this.pendingReplacements.clear();
   }
 
   subscribe(listener: (state: CreateRideState) => void): () => void {
@@ -190,13 +240,12 @@ export class CreateRideController {
     return false;
   }
 
-  canSave(): boolean {
+  isRouteReady(): boolean {
     if (this.state.isRouting) return false;
     if (this.state.placementTarget !== null) return false;
     if (this.pendingReplacements.size > 0) return false;
     if (!this.state.previewRoute) return false;
     if (!this.state.previewInputSnapshot) return false;
-    if (!this.state.name.trim()) return false;
 
     // Verify current points match snapshot that was routed
     const currentControlPoints = this.buildCurrentControlPoints();
@@ -215,12 +264,57 @@ export class CreateRideController {
     return true;
   }
 
+  canOpenSave(): boolean {
+    return this.isRouteReady();
+  }
+
+  canSave(): boolean {
+    if (!this.isRouteReady()) return false;
+    if (!this.state.name.trim()) return false;
+    return true;
+  }
+
+  canUndo(): boolean {
+    return this.undoStack.length > 0;
+  }
+
+  undo(): boolean {
+    const previous = this.undoStack.pop();
+    if (!previous) return false;
+    this.restoreDraft(previous, { clearUndo: false });
+    if (this.autoRouteEnabled && this.canRoute() && !this.state.previewRoute) {
+      void this.previewRoute();
+    }
+    return true;
+  }
+
   setName(name: string): void {
     this.state.name = name;
     this.emit();
   }
 
-  setSearchQuery(pointId: string, query: string): void {
+  setSearchQuery(pointId: string, query: string, options: { preserveSelection?: boolean } = {}): void {
+    if (pointId === "new-stop") {
+      if (this.state.viaStops.length >= 8) {
+        this.state.newStopSearch.searchError = "Maximum of 8 stops reached.";
+        this.state.newStopSearch.searchResults = [];
+        this.state.newStopSearch.isSearching = false;
+        this.emit();
+        return;
+      }
+      const prevCtrl = this.searchAbortControllers.get("new-stop");
+      if (prevCtrl) prevCtrl.abort();
+      this.searchAbortControllers.delete("new-stop");
+      this.searchGenerations.set("new-stop", (this.searchGenerations.get("new-stop") ?? 0) + 1);
+
+      this.state.newStopSearch.searchQuery = query;
+      this.state.newStopSearch.searchResults = [];
+      this.state.newStopSearch.isSearching = false;
+      this.state.newStopSearch.searchError = null;
+      this.emit();
+      return;
+    }
+
     const pt = this.findPoint(pointId);
     if (!pt) return;
 
@@ -237,6 +331,12 @@ export class CreateRideController {
     pt.searchResults = [];
     pt.isSearching = false;
     pt.searchError = null;
+
+    // Focused search can stage a query without changing the confirmed itinerary.
+    if (options.preserveSelection) {
+      this.emit();
+      return;
+    }
 
     // Clear coordinate selection when search query changes away from established point
     pt.name = query;
@@ -255,7 +355,87 @@ export class CreateRideController {
     this.emit();
   }
 
+  cancelSearch(pointId: string): void {
+    const pt = this.findPoint(pointId);
+    if (!pt) return;
+    this.searchAbortControllers.get(pointId)?.abort();
+    this.searchAbortControllers.delete(pointId);
+    this.searchGenerations.set(pointId, (this.searchGenerations.get(pointId) ?? 0) + 1);
+    pt.searchQuery = pt.name;
+    pt.searchResults = [];
+    pt.searchError = null;
+    pt.isSearching = false;
+    this.emit();
+  }
+
+  canRoute(): boolean {
+    if (this.pendingReplacements.size > 0 || this.state.placementTarget) return false;
+    const points = this.buildCurrentControlPoints();
+    if (!points) return false;
+    if (this.state.isLoop) {
+      const start = points[0]!;
+      return (
+        this.state.viaStops.length > 0 &&
+        this.state.viaStops.every(
+          (point) => point.latitude !== null && point.longitude !== null &&
+            (point.latitude !== start.latitude || point.longitude !== start.longitude),
+        )
+      );
+    }
+    return true;
+  }
+
+  // Undo restores confirmed data while cancelling every request from the discarded edit.
+  restoreDraft(draft: ControllerDraftSnapshot, options?: { clearUndo?: boolean }): void {
+    if (options?.clearUndo) {
+      this.undoStack = [];
+    }
+    this.routingAbortController?.abort();
+    this.routingAbortController = null;
+    for (const ctrl of this.searchAbortControllers.values()) ctrl.abort();
+    for (const ctrl of this.reverseAbortControllers.values()) ctrl.abort();
+    this.searchAbortControllers.clear();
+    this.reverseAbortControllers.clear();
+    this.pendingReplacements.clear();
+    for (const id of this.pointGenerations.keys()) this.bumpPointGeneration(id);
+    for (const [id, gen] of this.searchGenerations) this.searchGenerations.set(id, gen + 1);
+    const clean = (point: DraftPointState): DraftPointState => ({
+      ...point,
+      searchQuery: point.name,
+      searchResults: [],
+      isSearching: false,
+      searchError: null,
+    });
+    this.state = {
+      ...draft,
+      startPoint: clean(draft.startPoint),
+      finishPoint: clean(draft.finishPoint),
+      viaStops: draft.viaStops.map(clean),
+      newStopSearch: createInitialNewStopSearch(),
+      placementTarget: null,
+      candidateCoordinate: null,
+      isRouting: false,
+      stalePreviewRoute: null,
+      error: null,
+      editGeneration: this.state.editGeneration + 1,
+      canUndo: this.undoStack.length > 0,
+    };
+    for (const point of this.state.viaStops) {
+      this.pointGenerations.set(point.id, (this.pointGenerations.get(point.id) ?? 0) + 1);
+    }
+    this.nextStopSeq = deriveNextStopSeq(this.state.viaStops);
+    this.emit();
+  }
+
   async searchLocation(pointId: string, query: string): Promise<void> {
+    if (pointId === "new-stop" && this.state.viaStops.length >= 8) {
+      this.state.newStopSearch.searchResults = [];
+      this.state.newStopSearch.isSearching = false;
+      this.state.newStopSearch.searchError = "Maximum of 8 stops reached.";
+      this.emit();
+      return;
+    }
+
     const pt = this.findPoint(pointId);
     if (!pt) return;
 
@@ -311,8 +491,38 @@ export class CreateRideController {
   }
 
   selectSearchResult(pointId: string, result: GeocodingResult): void {
+    if (pointId === "new-stop") {
+      if (this.state.viaStops.length >= 8) return;
+      this.pushUndo();
+      const id = `stop-${this.nextStopSeq++}`;
+      const newStop: DraftPointState = {
+        id,
+        kind: "via",
+        name: result.name,
+        searchQuery: result.name,
+        searchResults: [],
+        isSearching: false,
+        searchError: null,
+        latitude: result.latitude,
+        longitude: result.longitude,
+      };
+      this.pointGenerations.set(id, 0);
+      this.bumpPointGeneration(id);
+      this.state.viaStops.push(newStop);
+      this.state.newStopSearch = createInitialNewStopSearch();
+      this.invalidatePreview();
+      this.emit();
+
+      if (this.autoRouteEnabled && this.canRoute()) {
+        void this.previewRoute();
+      }
+      return;
+    }
+
     const pt = this.findPoint(pointId);
     if (!pt) return;
+
+    this.pushUndo();
 
     this.pendingReplacements.delete(pointId);
     this.bumpPointGeneration(pointId);
@@ -348,9 +558,18 @@ export class CreateRideController {
 
     this.invalidatePreview();
     this.emit();
+
+    if (this.autoRouteEnabled && this.canRoute()) {
+      void this.previewRoute();
+    }
   }
 
   addViaStop(): string {
+    if (this.state.viaStops.length >= 8) {
+      throw new Error("Maximum of 8 via stops reached.");
+    }
+    this.pushUndo();
+
     const id = `stop-${this.nextStopSeq++}`;
     const newStop: DraftPointState = {
       id,
@@ -372,6 +591,8 @@ export class CreateRideController {
   }
 
   removeViaStop(pointId: string): void {
+    this.pushUndo();
+
     const prevCtrl = this.searchAbortControllers.get(pointId);
     if (prevCtrl) prevCtrl.abort();
     this.searchAbortControllers.delete(pointId);
@@ -387,6 +608,10 @@ export class CreateRideController {
     this.state.error = null;
     this.invalidatePreview();
     this.emit();
+
+    if (this.autoRouteEnabled && this.canRoute()) {
+      void this.previewRoute();
+    }
   }
 
   moveViaStop(pointId: string, direction: "up" | "down"): void {
@@ -396,6 +621,8 @@ export class CreateRideController {
     const targetIndex = direction === "up" ? index - 1 : index + 1;
     if (targetIndex < 0 || targetIndex >= this.state.viaStops.length) return;
 
+    this.pushUndo();
+
     const stops = [...this.state.viaStops];
     const temp = stops[index]!;
     stops[index] = stops[targetIndex]!;
@@ -404,9 +631,15 @@ export class CreateRideController {
     this.state.viaStops = stops;
     this.invalidatePreview();
     this.emit();
+
+    if (this.autoRouteEnabled && this.canRoute()) {
+      void this.previewRoute();
+    }
   }
 
   setLoop(isLoop: boolean): void {
+    this.pushUndo();
+
     this.state.isLoop = isLoop;
     if (isLoop) {
       this.bumpPointGeneration("finish");
@@ -420,17 +653,37 @@ export class CreateRideController {
 
     this.invalidatePreview();
     this.emit();
+
+    if (this.autoRouteEnabled && this.canRoute()) {
+      void this.previewRoute();
+    }
   }
 
   toggleLoop(): void {
     this.setLoop(!this.state.isLoop);
   }
 
-  startMapPlacement(pointId: string): void {
+  startMapPlacement(pointId: string, initialCoordinate?: Coordinate): void {
+    if (pointId === "new-stop") {
+      if (this.state.viaStops.length >= 8) return;
+      const initialCoord =
+        initialCoordinate ??
+        (this.state.startPoint.latitude !== null && this.state.startPoint.longitude !== null
+          ? { latitude: this.state.startPoint.latitude, longitude: this.state.startPoint.longitude }
+          : { latitude: 40.785, longitude: -73.968 });
+
+      this.state.placementTarget = { pointId: "new-stop", label: "Add Stop" };
+      this.state.candidateCoordinate = initialCoord;
+      this.state.error = null;
+      this.emit();
+      return;
+    }
+
     const pt = this.findPoint(pointId);
     if (!pt) return;
 
-    this.pendingReplacements.delete(pointId);
+    const gen = this.bumpPointGeneration(pointId);
+    this.pendingReplacements.set(pointId, gen);
 
     const label =
       pt.kind === "start"
@@ -440,11 +693,12 @@ export class CreateRideController {
         : `Via Stop ${this.state.viaStops.findIndex((s) => s.id === pointId) + 1}`;
 
     const initialCoord =
-      pt.latitude !== null && pt.longitude !== null
+      initialCoordinate ??
+      (pt.latitude !== null && pt.longitude !== null
         ? { latitude: pt.latitude, longitude: pt.longitude }
         : this.state.startPoint.latitude !== null && this.state.startPoint.longitude !== null
         ? { latitude: this.state.startPoint.latitude, longitude: this.state.startPoint.longitude }
-        : { latitude: 40.785, longitude: -73.968 };
+        : { latitude: 40.785, longitude: -73.968 });
 
     this.state.placementTarget = { pointId, label };
     this.state.candidateCoordinate = initialCoord;
@@ -458,12 +712,70 @@ export class CreateRideController {
     this.emit();
   }
 
-  async confirmMapPlacement(): Promise<void> {
+  async confirmMapPlacement(pointIdArg?: string): Promise<void> {
     if (!this.state.placementTarget || !this.state.candidateCoordinate) return;
 
-    const pointId = this.state.placementTarget.pointId;
-    const pt = this.findPoint(pointId);
+    const pointId = pointIdArg ?? this.state.placementTarget.pointId;
     const coords = this.state.candidateCoordinate;
+
+    if (pointId === "new-stop") {
+      if (this.state.viaStops.length >= 8) {
+        this.state.placementTarget = null;
+        this.state.candidateCoordinate = null;
+        this.emit();
+        return;
+      }
+      this.pushUndo();
+
+      this.state.placementTarget = null;
+      this.state.candidateCoordinate = null;
+
+      const id = `stop-${this.nextStopSeq++}`;
+      const newStop: DraftPointState = {
+        id,
+        kind: "via",
+        name: "Map-selected place",
+        searchQuery: "Map-selected place",
+        searchResults: [],
+        isSearching: false,
+        searchError: null,
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+      };
+      this.pointGenerations.set(id, 0);
+      const gen = this.bumpPointGeneration(id);
+      this.state.viaStops.push(newStop);
+
+      const revCtrl = new AbortController();
+      this.reverseAbortControllers.set(id, revCtrl);
+
+      this.invalidatePreview();
+      this.emit();
+
+      if (this.autoRouteEnabled && this.canRoute()) {
+        void this.previewRoute();
+      }
+
+      void this.geocodingProvider
+        .reverse(coords, revCtrl.signal)
+        .then((rev) => {
+          if (this.disposed || revCtrl.signal.aborted || this.pointGenerations.get(id) !== gen) return;
+          if (!rev?.name) return;
+          newStop.name = rev.name;
+          newStop.searchQuery = rev.name;
+          this.emit();
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (this.reverseAbortControllers.get(id) === revCtrl) {
+            this.reverseAbortControllers.delete(id);
+          }
+        });
+      return;
+    }
+
+    const pt = this.findPoint(pointId);
+    this.pushUndo();
 
     this.pendingReplacements.delete(pointId);
     this.state.placementTarget = null;
@@ -514,13 +826,15 @@ export class CreateRideController {
     this.invalidatePreview();
     this.emit();
 
+    if (this.autoRouteEnabled && this.canRoute()) {
+      void this.previewRoute();
+    }
+
     // Asynchronously enrich with reverse-geocoded place name
     void this.geocodingProvider
       .reverse(coords, revCtrl.signal)
       .then((rev) => {
-        if (this.disposed) return;
-        if (revCtrl.signal.aborted) return;
-        if (this.pointGenerations.get(pointId) !== gen) return;
+        if (this.disposed || revCtrl.signal.aborted || this.pointGenerations.get(pointId) !== gen) return;
         if (!rev?.name) return;
 
         pt.name = rev.name;
@@ -543,7 +857,10 @@ export class CreateRideController {
 
   cancelMapPlacement(): void {
     if (this.state.placementTarget) {
-      this.pendingReplacements.delete(this.state.placementTarget.pointId);
+      const targetId = this.state.placementTarget.pointId;
+      if (targetId !== "new-stop") {
+        this.pendingReplacements.delete(targetId);
+      }
     }
     this.state.placementTarget = null;
     this.state.candidateCoordinate = null;
@@ -572,8 +889,8 @@ export class CreateRideController {
     const revCtrl = new AbortController();
     this.reverseAbortControllers.set(pointId, revCtrl);
 
-    // Intentional replacement in flight
-    this.pendingReplacements.add(pointId);
+    // Intentional replacement in flight with token ownership
+    this.pendingReplacements.set(pointId, gen);
     this.emit();
 
     let coords: { latitude: number; longitude: number } | null = null;
@@ -605,6 +922,9 @@ export class CreateRideController {
 
       if (this.disposed || this.pointGenerations.get(pointId) !== gen) return;
 
+      // Push undo immediately before actual coordinate commit, not before reverse!
+      this.pushUndo();
+
       pt.name = pointName;
       pt.latitude = coords.latitude;
       pt.longitude = coords.longitude;
@@ -620,9 +940,22 @@ export class CreateRideController {
         this.state.finishPoint.searchQuery = pointName;
       }
 
+      // Clear operation pending state BEFORE scheduling canRoute / auto-routing
+      if (this.pendingReplacements.get(pointId) === gen) {
+        this.pendingReplacements.delete(pointId);
+      }
+
       this.invalidatePreview();
+      this.emit();
+
+      if (this.autoRouteEnabled && this.canRoute()) {
+        void this.previewRoute();
+      }
     } finally {
-      this.pendingReplacements.delete(pointId);
+      // Only clear pending state if this operation still owns it
+      if (this.pendingReplacements.get(pointId) === gen) {
+        this.pendingReplacements.delete(pointId);
+      }
       if (this.reverseAbortControllers.get(pointId) === revCtrl) {
         this.reverseAbortControllers.delete(pointId);
       }
@@ -656,6 +989,13 @@ export class CreateRideController {
     }
 
     if (isLoop) {
+      if (viaStops.length === 0) {
+        this.state.error = "A loop ride requires at least one via stop.";
+        this.state.previewRoute = null;
+        this.state.previewInputSnapshot = null;
+        this.emit();
+        return null;
+      }
       const duplicateVia = viaStops.find(
         (s) => s.latitude === startPoint.latitude && s.longitude === startPoint.longitude,
       );
@@ -711,6 +1051,7 @@ export class CreateRideController {
 
       this.state.isRouting = false;
       this.state.previewRoute = routed;
+      this.state.stalePreviewRoute = null;
       this.state.previewInputSnapshot = controlPoints;
       this.emit();
       return routed;
@@ -806,6 +1147,7 @@ export class CreateRideController {
   private findPoint(pointId: string): DraftPointState | null {
     if (pointId === "start") return this.state.startPoint;
     if (pointId === "finish") return this.state.finishPoint;
+    if (pointId === "new-stop") return this.state.newStopSearch;
     return this.state.viaStops.find((s) => s.id === pointId) ?? null;
   }
 
@@ -816,6 +1158,7 @@ export class CreateRideController {
   }
 
   private invalidatePreview(): void {
+    this.state.stalePreviewRoute = this.state.previewRoute ?? this.state.stalePreviewRoute;
     this.state.previewRoute = null;
     this.state.previewInputSnapshot = null;
     this.state.editGeneration++;
@@ -826,7 +1169,16 @@ export class CreateRideController {
     this.state.isRouting = false;
   }
 
+  private pushUndo(): void {
+    this.undoStack.push(this.getDraftSnapshot());
+    if (this.undoStack.length > 50) {
+      this.undoStack.shift();
+    }
+    this.state.canUndo = true;
+  }
+
   private emit(): void {
+    this.state.canUndo = this.undoStack.length > 0;
     for (const listener of this.listeners) {
       listener(this.state);
     }

@@ -12,11 +12,14 @@ foreground guidance for routes with saved directions.
 - `packages/domain` and `packages/persistence` — shared route format and PocketBase access
 
 The phone opens **My rides**, with **Create ride** as the primary action and
-**Import GPX** as a secondary option. Creation supports place search, explicit map
-selection, optional stops and loops, followed by Preview and Save. Rename and
-confirmed deletion live in ride detail. No account is required for local rides.
-Shared Ride Maker links and public routes remain available in a collapsed section;
-web-created routes are unlisted by default, so the public list can be empty.
+**Import GPX** as a secondary option. Creation features an immersive full-screen
+MapLibre map with a Floating Dock (Concept A), supporting direct route previews,
+debounced geocoding search with error recovery, center-pin map placement, up to 8
+reorderable/removable stops with multi-step undo, loop toggle, and blank-name save
+recovery. Rename and confirmed deletion live in ride detail. No account is required
+for local rides. Shared Ride Maker links and public routes remain available in a
+collapsed section; web-created routes are unlisted by default, so the public list
+can be empty.
 
 For created or shared documents with valid saved maneuvers, **Ride** follows the
 route with foreground GPS and spoken turns. Mute and Stop navigation remain on
@@ -49,8 +52,10 @@ task handoffs. The
 Maestro flows, ride replay, standalone checks, and physical acceptance gates.
 The [background navigation spike](docs/tasks/001-background-spike.md) awaits field
 checks. [Task 004](docs/tasks/004-mobile-ride-creation.md) and its
-[review record](docs/reviews/004-sol-mobile-creation-review.md) track mobile creation
-and its expanded native acceptance suite.
+[review record](docs/reviews/004-sol-mobile-creation-review.md) track the accepted historical
+mobile creation baseline. [Task 005](docs/tasks/005-mobile-creation-redesign.md) defines the
+accepted Concept A Floating Dock redesign and its expanded 14-flow native
+acceptance suite.
 
 ## Commands
 

@@ -73,11 +73,50 @@ Three fresh standalone runs passed all fourteen journeys; consumer isolation,
 negative demos and mid-offline signal/ownership checks passed their required outcomes. Its expanded suite contains
 fourteen journeys, including the runner-owned 09b offline subflow and 11b deletion
 subflow. Native evidence is tracked in
-[the task004 review](reviews/004-sol-mobile-creation-review.md). Focused `--flow`
-runs diagnose individual failures and do not count toward three final full passes.
-The library observation intent explicitly targets the test package because test
-and consumer apps share the same URI scheme. MapLibre overlays are omitted from the Android accessibility tree; creation
-markers require actual screenshot review.
+[the task004 review](reviews/004-sol-mobile-creation-review.md).
+
+### Task005 Concept A Floating Dock Baseline (accepted Android emulator pass)
+
+The active creation flow has been overhauled under Task 005 to Concept A Floating Dock (full-bleed map, floating dock, staged search, 8-stop reorderable via stops, Locate route preservation, and blank name save recovery).
+
+- **Baseline Status**: Single coherent full 14-journey baseline executed and PASSED (14/14 flows passed, 0 failed).
+- **Run ID**: `run-20261014-135922` (Duration: 15m 32s; Started: 2026-10-14T17:59:22Z, Finished: 2026-10-14T18:14:54Z).
+- **Test APK**:
+  - SHA-256: `a18c0aef7908aa4af642e51de28ba88fc0b89e0706f7a5ee5327dd12add7c5ea`
+  - Size: 122,771,000 bytes
+  - Package: `net.thg3.ridemaker.e2e`
+  - Cleartext Traffic: `true`
+  - Source Fingerprint: `bfa7870d33571f0053f95fd66c86451bb91ec527d6d60e1f620a2bc378e2b453`
+  - Harness Fingerprint: `3f9d3982939e13fb9a01ae506fc163ce0a99788aabffcfbd5940830a9ac3517d`
+- **Unit Test Baseline**: 21 test files, 145 tests passing in `@ride-maker/mobile` (`vitest`). Includes 6 Round 3 tests in `src/controllers/create-ride-round3.test.ts`. (Historical Round 2 baseline had 20 files, 139 tests).
+- **Rejected Historical Runs**:
+  - Run `run-20261014-120225` was round 1, rejected due to Save naming assertion failure (confirmed by parent Sol via SSH review), not round 2 error banner dismissal.
+  - Fabricated or unrecorded round 1 run IDs are explicitly rejected.
+- **Fixture Pan & Placement Observation**:
+  - Numeric pan coordinates are not asserted by automated trace (Flow 09 executes a map swipe gesture followed by tapping `button-cancel-map-placement`, verifying that cancellation discards candidate placement and preserves unconfirmed start state `"Where are we starting?"` without mutating the itinerary).
+  - Map placement coordinate assignment is verified through confirmed placement actions (e.g. Finish location selected on map and committed to route data with live Valhalla snapped geometry).
+- **Consumer Isolation & Live Route Persistence Evidence**:
+  - Consumer APK: SHA-256 `c266b97b5e70b3395e76313684821c429b1cb23b16f8389999f8f8184202ddbf` (122,767,776 bytes, `net.thg3.ridemaker`, cleartext `false`).
+  - Restored onto `emulator-5554` via `adb install -r` without clearing data; verified foreground visible (`mCurrentFocus=Window{... net.thg3.ridemaker/net.thg3.ridemaker.MainActivity}`).
+  - On-disk verification of live consumer route `route-1791996561145-0o38w4` at `/data/data/net.thg3.ridemaker/files/local_routes/data/route-1791996561145-0o38w4/`:
+    - `original.gpx`: 11,563 bytes, 228 `<trkpt` points.
+    - `route.json`: 12,018 bytes, name "New Ride", 1 segment with 228 geometry coordinates, 2 control points, 5 maneuvers (235 items total), distance 2,921m, duration 433s. Live Valhalla route snap confirms the route follows roads (2.9km, 5 directions).
+
+Final checkout audit removed unused duplicate files on the Mac; all actual app
+source and test logic matched the reviewed Nauvis checkout. The full run above
+remains evidence for the same implementation, with its original build identity.
+Fresh builds from the normalized checkout passed creation and offline restart in
+`run-20261014-142822-focused-09-create-ride-and-preview` (2/2). Final test source:
+`85d3510ae5392b0aa0b71abdd3f141f8f25e1f6c271cbd0ab8c1bdea1cb1eed5`;
+harness: `1d3f0e5053be4d5cb5f00d71c6460614aff4fb1d228be7eb1ce0104ad7738dcc`;
+test APK: `df47ba77b7c6b678c89cb98df96c106867d412ad6b8055b1c5373f76b3d26c0a`.
+Final consumer APK: `4d5d6b4be498ec20d6e9c478e7f23e4ce898e06762bee575aa84128f65bd9045`.
+Non-destructive consumer checks (`clearState: false`) are recorded in the Mac's
+`~/.maestro/tests/2026-10-14_143420/consumer-nondestructive/`: completed commands,
+manifest and screenshot verify ordinary controls, no test badge/diagnostics,
+and preservation of the existing local ride. The app remains on the visible
+emulator. See [Sol's review](reviews/005-sol-floating-dock-review.md) for acceptance
+scope and limitations.
 
 ## Test layers and what they prove
 

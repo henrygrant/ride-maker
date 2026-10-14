@@ -1,6 +1,12 @@
 # Contract: Mobile Ride Creation, Primary Surfaces & Data Contracts
 
-Status: accepted Android emulator implementation (2026-10-14); see the task004 Sol review.
+> [!NOTE]
+> **Contract Lifecycle & Historical Baseline**:
+> This document records the **accepted Android emulator baseline** for **Task 004** (split-view form creation, accepted 2026-10-14; see the [Task 004 Sol review](../reviews/004-sol-mobile-creation-review.md)).
+>
+> The active creation UX has been redesigned under **Task 005** to **Concept A Floating Dock** (immersive full-bleed map, floating thumb-zone dock, staged search, 8-stop reorderable via stops, Locate route preservation, and blank-name recovery). See [`docs/tasks/005-mobile-creation-redesign.md`](../tasks/005-mobile-creation-redesign.md) for the active Task 005 contract, which was **accepted on the Android emulator on 2026-10-14** after Sol review.
+
+Status: Historical accepted Android emulator implementation (2026-10-14); see the task004 Sol review. Active Task 005 redesign is accepted on the Android emulator; see its task and review record.
 Implements UX and technical requirements defined in `docs/tasks/004-mobile-ride-creation.md`.
 
 ---

@@ -147,10 +147,47 @@ const server = http.createServer((req, res) => {
             country: "USA",
           },
         },
+        {
+          geometry: { coordinates: [-73.955, 40.795] },
+          properties: {
+            osm_id: 1003,
+            osm_type: "way",
+            name: "Harlem Meer Northern Shore Promenade",
+            city: "New York",
+            state: "NY",
+            country: "USA",
+          },
+        },
+        {
+          geometry: { coordinates: [-73.969, 40.773] },
+          properties: {
+            osm_id: 1004,
+            osm_type: "way",
+            name: "Conservatory Water Sailboat Pond",
+            city: "New York",
+            state: "NY",
+            country: "USA",
+          },
+        },
       ];
 
+      const queryLower = q.toLowerCase();
+      let matched = features;
+      if (queryLower.includes("harlem")) {
+        matched = features.filter((f) => f.properties.osm_id === 1003);
+      } else if (queryLower.includes("conservatory")) {
+        matched = features.filter((f) => f.properties.osm_id === 1004);
+      } else if (queryLower.includes("central park")) {
+        matched = features.filter((f) => f.properties.osm_id === 1001 || f.properties.osm_id === 1002);
+      } else if (queryLower.length > 0) {
+        matched = features.filter((f) => f.properties.name.toLowerCase().includes(queryLower));
+        if (matched.length === 0) {
+          matched = features.slice(0, 2);
+        }
+      }
+
       res.writeHead(200);
-      res.end(JSON.stringify({ features }));
+      res.end(JSON.stringify({ features: matched }));
     };
 
     if (delayMs > 0) {

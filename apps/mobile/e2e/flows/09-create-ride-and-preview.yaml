@@ -12,11 +12,10 @@ appId: net.thg3.ridemaker.e2e
 # 1. Open Create Ride screen
 - tapOn:
     id: "button-create-ride"
-- assertVisible: "Create Ride"
-- assertVisible:
-    id: "input-created-ride-name"
 - assertVisible:
     id: "view-create-map"
+- assertVisible: "Where are we starting?"
+- takeScreenshot: 09-scene-empty-dock
 
 # 2. Test Map Placement candidate movement, confirmation, cancel, and recovery
 - tapOn:
@@ -25,79 +24,21 @@ appId: net.thg3.ridemaker.e2e
     id: "button-cancel-map-placement"
 - assertVisible:
     id: "button-confirm-map-placement"
-# Tap on map to set candidate point and confirm it
-- tapOn:
-    id: "view-create-map"
-- tapOn:
-    id: "button-confirm-map-placement"
-- extendedWaitUntil:
-    visible: "Map-selected place"
-    timeout: 10000
-
-# Test map pick again and cancel
-- tapOn:
-    id: "button-map-pick-start"
-- assertVisible:
-    id: "button-cancel-map-placement"
+- takeScreenshot: 09-scene-candidate-pin
+# Pan on map to change candidate coordinate
+- swipe:
+    start: "50%,50%"
+    end: "30%,40%"
+# Cancel map pick preserves start unset
 - tapOn:
     id: "button-cancel-map-placement"
 - assertNotVisible:
     id: "button-cancel-map-placement"
+- assertVisible: "Where are we starting?"
 
-# Confirm a map choice through the production handler, then replace it with search.
+# Set start location via search (Central Park Loop)
 - tapOn:
-    id: "button-map-pick-start"
-- tapOn:
-    id: "view-create-map"
-- tapOn:
-    id: "button-confirm-map-placement"
-- assertNotVisible:
-    id: "button-confirm-map-placement"
-
-# Search failure/no results retain the draft and allow a subsequent search.
-- tapOn:
-    id: "input-start-location"
-- eraseText: 100
-- inputText: "empty"
-- hideKeyboard
-- extendedWaitUntil:
-    visible: 'No results found for "empty".'
-    timeout: 10000
-- tapOn:
-    id: "input-start-location"
-- eraseText: 100
-- inputText: "fail"
-- hideKeyboard
-- extendedWaitUntil:
-    visible: "Place search failed .*"
-    timeout: 10000
-
-# 3. Controlled geocoding search failure, no-results, and recovery
-# 3a. Search error recovery (fixture mode "fail")
-- tapOn:
-    id: "input-start-location"
-- eraseText: 50
-- inputText: "fail"
-- hideKeyboard
-- extendedWaitUntil:
-    visible:
-      id: "text-search-error-start"
-    timeout: 10000
-
-# 3b. No results feedback (fixture mode "empty")
-- tapOn:
-    id: "input-start-location"
-- eraseText: 50
-- inputText: "empty"
-- hideKeyboard
-- extendedWaitUntil:
-    visible: 'No results found for "empty".'
-    timeout: 10000
-
-# 3c. Valid search recovery and selection
-- tapOn:
-    id: "input-start-location"
-- eraseText: 50
+    id: "button-open-search"
 - inputText: "Central Park Loop"
 - hideKeyboard
 - extendedWaitUntil:
@@ -106,27 +47,39 @@ appId: net.thg3.ridemaker.e2e
     timeout: 10000
 - tapOn:
     id: "search-item-1001"
-- assertNotVisible:
-    id: "text-search-error-start"
+- assertVisible: "Where are we going?"
 
-# 4. Enter ride name
+# Test map pick finish and cancel
 - tapOn:
-    id: "input-created-ride-name"
-- eraseText: 50
-- inputText: "Morning River Loop"
-- hideKeyboard
-
-# 5. Add via stop with selectable search
-- tapOn:
-    id: "button-add-stop"
-- scrollUntilVisible:
-    element:
-      id: "input-stop-0"
-    direction: DOWN
+    id: "button-map-pick-finish"
 - assertVisible:
-    id: "input-stop-0"
+    id: "button-cancel-map-placement"
 - tapOn:
-    id: "input-stop-0"
+    id: "button-cancel-map-placement"
+- assertNotVisible:
+    id: "button-cancel-map-placement"
+
+# 3. Controlled geocoding search failure, no-results, and recovery
+- tapOn:
+    id: "button-open-search"
+- takeScreenshot: 09-scene-search-keyboard
+# 3a. Search error recovery (fixture mode "fail")
+- inputText: "fail"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "text-search-error-finish"
+    timeout: 10000
+
+# 3b. No results feedback (fixture mode "empty")
+- eraseText: 50
+- inputText: "empty"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: 'No results found for "empty".'
+    timeout: 10000
+
+# 3c. Valid search recovery and selection
 - eraseText: 50
 - inputText: "Sheep Meadow"
 - hideKeyboard
@@ -137,22 +90,7 @@ appId: net.thg3.ridemaker.e2e
 - tapOn:
     id: "search-item-1002"
 
-# 6. Make loop ride
-- scrollUntilVisible:
-    element:
-      id: "button-make-loop"
-    direction: DOWN
-- tapOn:
-    id: "button-make-loop"
-- assertVisible: "✓ Loop Ride"
-
-# 7. Preview Route (enters Preview mode)
-- scrollUntilVisible:
-    element:
-      id: "button-preview-route"
-    direction: DOWN
-- tapOn:
-    id: "button-preview-route"
+# 4. Auto-route calculates preview (enters Ready mode)
 - extendedWaitUntil:
     visible:
       id: "text-preview-distance"
@@ -165,45 +103,230 @@ appId: net.thg3.ridemaker.e2e
     id: "button-save-created-ride"
 - takeScreenshot: 09-create-route-preview
 
-# 8. Test Edit points toggle back to Edit mode and stale-save prevention
-- tapOn:
-    id: "button-edit-points"
-- assertVisible: "Create Ride"
+# 5. Test Undo: reverts finish point
 - assertVisible:
-    id: "button-preview-route"
+    id: "button-undo"
+- tapOn:
+    id: "button-undo"
+- assertVisible: "Where are we going?"
 - assertNotVisible:
     id: "button-save-created-ride"
 
-# Editing the selected point clears its coordinates and rejects the old preview.
-- scrollUntilVisible:
-    element:
-      id: "input-start-location"
-    direction: UP
+# Re-set finish point via search
 - tapOn:
-    id: "input-start-location"
-- eraseText: 100
-- inputText: "empty"
+    id: "button-open-search"
+- inputText: "Sheep Meadow"
 - hideKeyboard
-- scrollUntilVisible:
-    element:
-      id: "button-preview-route"
-    direction: DOWN
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1002"
+    timeout: 10000
 - tapOn:
-    id: "button-preview-route"
-- assertVisible: "Please choose a start location."
-- assertNotVisible:
+    id: "search-item-1002"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-distance"
+    timeout: 15000
+
+# 6. Verify Locate button leaves route preview intact
+- assertVisible:
+    id: "button-center-location"
+- tapOn:
+    id: "button-center-location"
+- assertVisible:
+    id: "text-preview-distance"
+- assertVisible:
     id: "button-save-created-ride"
-- scrollUntilVisible:
-    element:
-      id: "input-start-location"
-    direction: UP
+
+# 7. Test Make Loop & Staged Loop Top Search (R3.1: Cancel vs Commit)
 - tapOn:
-    id: "input-start-location"
-- eraseText: 100
-- inputText: "Central Park Loop"
+    id: "button-edit-points"
+- assertVisible: "Route points"
+- tapOn:
+    id: "button-make-loop"
+- assertVisible: "✓ Loop ride"
+- tapOn:
+    id: "button-edit-points"
+# In empty loop mode, prompt instructs to add a stop to return to start
+- extendedWaitUntil:
+    visible: "RETURN TO START"
+    timeout: 10000
+
+# In loop mode, top search advertises "Add stop"
+- tapOn:
+    id: "button-open-search"
+- extendedWaitUntil:
+    visible:
+      id: "input-stop-new"
+    timeout: 10000
+# 7a. Controlled search error for new-stop
+- inputText: "fail"
 - hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "text-search-error-new-stop"
+    timeout: 10000
+# 7b. Staged query cancel: no itinerary mutation, preview preserved
+- eraseText: 50
+- inputText: "Conservatory"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1004"
+    timeout: 10000
 - tapOn:
-    id: "search-item-1001"
+    id: "button-close-search"
+- assertNotVisible:
+    id: "input-stop-new"
+- assertVisible: "RETURN TO START"
+
+# 7c. Top search commit: adds via stop to loop
+- tapOn:
+    id: "button-open-search"
+- inputText: "Sheep Meadow"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1002"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1002"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-turns"
+    timeout: 15000
+
+# 7d. Undo reverts newly added stop
+- assertVisible:
+    id: "button-undo"
+- tapOn:
+    id: "button-undo"
+- extendedWaitUntil:
+    visible: "RETURN TO START"
+    timeout: 10000
+
+# Re-commit via stop (Sheep Meadow)
+- tapOn:
+    id: "button-open-search"
+- inputText: "Sheep Meadow"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1002"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1002"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-turns"
+    timeout: 15000
+
+# 8. Multi-stop journey: 3+ long names, reorder up/down, remove, undo (R3.3)
+# Add 2nd stop with long name via top search
+- tapOn:
+    id: "button-open-search"
+- inputText: "Harlem"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1003"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1003"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-turns"
+    timeout: 15000
+
+# Add 3rd stop with long name via top search
+- tapOn:
+    id: "button-open-search"
+- inputText: "Conservatory"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1004"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1004"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-turns"
+    timeout: 15000
+
+# Open Edit Points sheet to view multiple stops
+- tapOn:
+    id: "button-edit-points"
+- assertVisible: "Route points"
+- takeScreenshot: 09-scene-expanded-points
+
+# Add 4th stop via sheet
+- tapOn:
+    id: "button-add-stop"
+- assertVisible:
+    id: "button-confirm-map-placement"
+- tapOn:
+    id: "button-confirm-map-placement"
+- extendedWaitUntil:
+    visible:
+      id: "button-edit-points"
+    timeout: 15000
+
+# Open edit points sheet to view all stops with long names
+- tapOn:
+    id: "button-edit-points"
+- takeScreenshot: 09-scene-multiple-stops
+
+# Test point options: down, up, remove, undo (R3.3)
+- tapOn:
+    id: "button-point-options-stop-0"
+- takeScreenshot: 09-scene-stop-options
+# Move stop 0 (Sheep Meadow) down
+- tapOn:
+    id: "button-stop-down-stop-0"
+# Move stop 1 (Sheep Meadow) back up
+- tapOn:
+    id: "button-point-options-stop-1"
+- tapOn:
+    id: "button-stop-up-stop-1"
+# Remove stop 1 (Harlem Meer)
+- tapOn:
+    id: "button-point-options-stop-1"
+- tapOn:
+    id: "button-stop-remove-stop-1"
+# Close sheet and test Undo restores removed stop
+- tapOn:
+    id: "button-edit-points"
+- assertVisible:
+    id: "button-undo"
+- tapOn:
+    id: "button-undo"
+# Reopen sheet to prune stops down to exactly 1 via stop for navigation feeder
+- tapOn:
+    id: "button-edit-points"
+- assertVisible: "Route points"
+# Remove Harlem Meer (currently stop 1)
+- tapOn:
+    id: "button-point-options-stop-1"
+- tapOn:
+    id: "button-stop-remove-stop-1"
+# Remove Conservatory Water (currently stop 1)
+- tapOn:
+    id: "button-point-options-stop-1"
+- tapOn:
+    id: "button-stop-remove-stop-1"
+# Remove Map-selected place (currently stop 1)
+- tapOn:
+    id: "button-point-options-stop-1"
+- tapOn:
+    id: "button-stop-remove-stop-1"
+# Close sheet: exactly 1 via stop (Sheep Meadow) remains
+- tapOn:
+    id: "button-edit-points"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-turns"
+    timeout: 15000
 
 # 9. Test Draft Keep on Back
 - tapOn:
@@ -217,19 +340,43 @@ appId: net.thg3.ridemaker.e2e
 # 10. Reopen Create Ride to verify draft preserved
 - tapOn:
     id: "button-create-ride"
-- assertVisible: "Morning River Loop"
-
-# 11. Preview again and Save Ride
-- scrollUntilVisible:
-    element:
-      id: "button-preview-route"
-    direction: DOWN
-- tapOn:
-    id: "button-preview-route"
 - extendedWaitUntil:
     visible:
-      id: "button-save-created-ride"
+      id: "text-preview-turns"
     timeout: 15000
+- assertVisible:
+    id: "button-save-created-ride"
+
+# 11. Blank name Save dead end fix & recovery (R3.2)
+- tapOn:
+    id: "button-save-created-ride"
+- assertVisible: "Give your ride a name"
+- assertVisible:
+    id: "input-created-ride-name"
+- tapOn:
+    id: "input-created-ride-name"
+- takeScreenshot: 09-scene-save-keyboard
+# Erase all name text
+- eraseText: 50
+- hideKeyboard
+# Back keeps draft valid route and returns to ready dock
+- tapOn:
+    id: "button-save-back"
+- assertVisible:
+    id: "text-preview-distance"
+# Ready dock Save button remains enabled so user can fix name!
+- assertVisible:
+    id: "button-save-created-ride"
+- tapOn:
+    id: "button-save-created-ride"
+# Reopens naming sheet
+- assertVisible: "Give your ride a name"
+- tapOn:
+    id: "input-created-ride-name"
+- eraseText: 50
+- inputText: "Morning River Loop"
+- hideKeyboard
+- takeScreenshot: 09-scene-save-naming
 - tapOn:
     id: "button-save-created-ride"
 
