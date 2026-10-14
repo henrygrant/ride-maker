@@ -11,10 +11,14 @@ export interface GeocodingProvider {
   reverse(coordinate: Coordinate, signal?: AbortSignal): Promise<GeocodingResult | null>;
 }
 
+export class GeocodingError extends Error {
+  override name = "GeocodingError";
+}
+
 type PhotonFeature = {
-  geometry: { coordinates: [number, number] };
-  properties: {
-    osm_id?: number;
+  geometry?: { coordinates?: [number, number] };
+  properties?: {
+    osm_id?: number | string;
     osm_type?: string;
     name?: string;
     housenumber?: string;
@@ -28,54 +32,221 @@ type PhotonFeature = {
 
 type PhotonResponse = { features?: PhotonFeature[] };
 
+export interface PhotonOptions {
+  timeoutMs?: number;
+}
+
 export class PhotonGeocodingProvider implements GeocodingProvider {
-  constructor(private readonly endpoint = "https://photon.komoot.io") {}
+  private readonly defaultTimeoutMs: number;
+
+  constructor(
+    private readonly endpoint = "https://photon.komoot.io",
+    options: PhotonOptions = {},
+  ) {
+    this.defaultTimeoutMs = options.timeoutMs ?? 10000;
+  }
 
   async search(
     query: string,
     options: { focus?: Coordinate; signal?: AbortSignal } = {},
   ): Promise<GeocodingResult[]> {
-    const params = new URLSearchParams({ q: query, limit: "5" });
+    if (options.signal?.aborted) {
+      throw new GeocodingError("Place search request was cancelled.");
+    }
+
+    const trimmed = query.trim();
+    if (trimmed.length === 0) {
+      return [];
+    }
+
+    const params = new URLSearchParams({ q: trimmed, limit: "5" });
     if (options.focus !== undefined) {
-      params.set("lat", String(options.focus.latitude));
-      params.set("lon", String(options.focus.longitude));
+      const { latitude, longitude } = options.focus;
+      if (
+        typeof latitude === "number" &&
+        Number.isFinite(latitude) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        typeof longitude === "number" &&
+        Number.isFinite(longitude) &&
+        longitude >= -180 &&
+        longitude <= 180
+      ) {
+        params.set("lat", String(latitude));
+        params.set("lon", String(longitude));
+      }
     }
     return this.request(`/api?${params}`, options.signal);
   }
 
   async reverse(coordinate: Coordinate, signal?: AbortSignal): Promise<GeocodingResult | null> {
+    if (signal?.aborted) {
+      throw new GeocodingError("Reverse geocoding request was cancelled.");
+    }
+
+    const { latitude, longitude } = coordinate;
+    if (
+      typeof latitude !== "number" ||
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      typeof longitude !== "number" ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return null;
+    }
+
     const params = new URLSearchParams({
-      lat: String(coordinate.latitude),
-      lon: String(coordinate.longitude),
+      lat: String(latitude),
+      lon: String(longitude),
       limit: "1",
     });
-    return (await this.request(`/reverse?${params}`, signal))[0] ?? null;
+    const results = await this.request(`/reverse?${params}`, signal);
+    return results[0] ?? null;
   }
 
-  private async request(path: string, signal?: AbortSignal): Promise<GeocodingResult[]> {
-    const response = await fetch(`${this.endpoint}${path}`, signal === undefined ? {} : { signal });
-    if (!response.ok) throw new Error(`Place search failed (${response.status}).`);
-    const data = (await response.json()) as PhotonResponse;
-    return (data.features ?? []).map(toResult);
+  private async request(path: string, externalSignal?: AbortSignal): Promise<GeocodingResult[]> {
+    const { signal, cleanup } = createTimeoutSignal(this.defaultTimeoutMs, externalSignal);
+
+    let response: Response;
+    let data: PhotonResponse;
+    try {
+      response = await fetch(`${this.endpoint}${path}`, {
+        signal,
+        headers: { "X-Client-Id": "ride-maker-local-development" },
+      });
+
+      if (!response.ok) {
+        throw new GeocodingError(`Place search failed (${response.status}).`);
+      }
+
+      try {
+        data = (await response.json()) as PhotonResponse;
+      } catch (err: unknown) {
+        if (signal.aborted) {
+          throw err;
+        }
+        throw new GeocodingError(`Geocoding returned invalid JSON response (${response.status}).`);
+      }
+    } catch (err: unknown) {
+      if (err instanceof GeocodingError) throw err;
+      const isAbort = (err as { name?: string })?.name === "AbortError" || signal.aborted;
+      if (isAbort && externalSignal?.aborted) {
+        throw new GeocodingError("Geocoding request was cancelled.");
+      }
+      if (isAbort) {
+        throw new GeocodingError(`Geocoding request timed out after ${this.defaultTimeoutMs}ms.`);
+      }
+      throw new GeocodingError(`Geocoding network error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      cleanup();
+    }
+
+    if (!data || typeof data !== "object") {
+      throw new GeocodingError("Geocoding returned empty or non-object response.");
+    }
+
+    if (!Array.isArray(data.features)) {
+      return [];
+    }
+
+    const results: GeocodingResult[] = [];
+    for (const feature of data.features) {
+      if (feature && typeof feature === "object") {
+        const parsed = toResult(feature);
+        if (parsed !== null) {
+          results.push(parsed);
+        }
+      }
+    }
+    return results;
   }
 }
 
-function toResult(feature: PhotonFeature): GeocodingResult {
-  const [longitude, latitude] = feature.geometry.coordinates;
-  const properties = feature.properties;
-  const streetAddress = [properties.housenumber, properties.street].filter(Boolean).join(" ");
-  const name = properties.name ?? (streetAddress || properties.city || "Unnamed place");
-  const context = [
-    streetAddress === name ? undefined : streetAddress,
-    properties.city ?? properties.district,
-    properties.state,
-    properties.country,
-  ].filter((part): part is string => Boolean(part));
+function toResult(feature: PhotonFeature): GeocodingResult | null {
+  const coords = feature.geometry?.coordinates;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const [longitude, latitude] = coords;
+  if (
+    typeof latitude !== "number" ||
+    !Number.isFinite(latitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    typeof longitude !== "number" ||
+    !Number.isFinite(longitude) ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
+
+  const props =
+    typeof feature.properties === "object" && feature.properties !== null
+      ? (feature.properties as Record<string, unknown>)
+      : {};
+
+  const nameRaw =
+    typeof props.name === "string"
+      ? props.name
+      : typeof props.street === "string"
+      ? props.street
+      : "";
+  const name = nameRaw.trim();
+  if (name.length === 0) return null;
+
+  const housenumber = typeof props.housenumber === "string" ? props.housenumber.trim() : "";
+  const street = typeof props.street === "string" ? props.street.trim() : "";
+  const houseAndStreet = housenumber ? `${housenumber} ${street}`.trim() : street;
+
+  const parts = [
+    houseAndStreet,
+    typeof props.district === "string" ? props.district.trim() : "",
+    typeof props.city === "string" ? props.city.trim() : "",
+    typeof props.state === "string" ? props.state.trim() : "",
+    typeof props.country === "string" ? props.country.trim() : "",
+  ].filter((p): p is string => p.length > 0);
+
+  const label = parts.length > 0 ? `${name}, ${parts.join(", ")}` : name;
+  const osmId =
+    props.osm_id !== undefined && props.osm_id !== null
+      ? String(props.osm_id)
+      : `${latitude},${longitude}`;
+
+  return { id: osmId, name, label, latitude, longitude };
+}
+
+function createTimeoutSignal(timeoutMs: number, externalSignal?: AbortSignal) {
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  if (timeoutMs > 0) {
+    timer = setTimeout(() => {
+      controller.abort(new Error(`Timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+  }
+
+  const onAbort = () => {
+    if (timer) clearTimeout(timer);
+    controller.abort(externalSignal?.reason ?? new Error("Aborted by caller"));
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onAbort();
+    } else {
+      externalSignal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
   return {
-    id: `${properties.osm_type ?? "place"}-${properties.osm_id ?? `${longitude}-${latitude}`}`,
-    name,
-    label: [...new Set([name, ...context])].join(", "),
-    latitude,
-    longitude,
+    signal: controller.signal,
+    cleanup: () => {
+      if (timer) clearTimeout(timer);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onAbort);
+      }
+    },
   };
 }

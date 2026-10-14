@@ -1,0 +1,101 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 1. Open the created ride from library
+- tapOn: "Morning River Loop"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Morning River Loop"
+- assertVisible:
+    id: "button-navigation-toggle"
+- assertVisible: "Ride"
+
+# 2. Enter active navigation (GPS feeder synchronizes concurrently)
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "view-guidance"
+- assertVisible:
+    id: "button-voice-toggle"
+- assertVisible: "Stop navigation"
+
+# 3. Synchronized GPS Navigation Stages
+# Stage 1: Initial turn / depart instruction
+- extendedWaitUntil:
+    visible: "Depart start point."
+    timeout: 35000
+- assertVisible: "0 m"
+- takeScreenshot: 10-created-ride-turn-instruction
+
+# Stage 2: Progress along route with fresh intermediate instruction and distance
+- extendedWaitUntil:
+    visible: "Arrive at intermediate stop 1."
+    timeout: 35000
+- assertVisible: "830 m"
+- takeScreenshot: 10-created-ride-progress
+
+# Stage 3: Off-route deviation detection
+- extendedWaitUntil:
+    visible: "Off route"
+    timeout: 35000
+- takeScreenshot: 10-created-ride-off-route
+
+# Stage 4: Destination arrival
+- extendedWaitUntil:
+    visible: "Arrived"
+    timeout: 35000
+- takeScreenshot: 10-created-ride-arrived
+
+# 4. Voice guidance mute/unmute toggle
+- tapOn:
+    id: "button-voice-toggle"
+- assertVisible: "Unmute"
+- tapOn:
+    id: "button-voice-toggle"
+- assertVisible: "Mute"
+
+# 5. Cancel End Ride via hardware Back key: continues GPS guidance
+- back
+- assertVisible:
+    id: "text-end-ride-confirm-message"
+- assertVisible: "Are you sure you want to end navigation?"
+- tapOn:
+    id: "button-end-ride-cancel"
+- assertVisible:
+    id: "view-guidance"
+- extendedWaitUntil:
+    visible: "Off route"
+    timeout: 15000
+- takeScreenshot: 10-created-cancel-continues
+
+# 6. Cancel End Ride via button toggle: continues GPS guidance
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "text-end-ride-confirm-message"
+- tapOn:
+    id: "button-end-ride-cancel"
+- assertVisible:
+    id: "view-guidance"
+
+# 7. Confirm End Ride: tears down navigation and speech
+- tapOn:
+    id: "button-navigation-toggle"
+- tapOn:
+    id: "button-end-ride-confirm"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Morning River Loop"
+- takeScreenshot: 10-created-ride-navigation-ended
+
+# Return to library
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Morning River Loop"

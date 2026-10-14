@@ -1,8 +1,7 @@
 # Mobile testing strategy
 
-Decision recorded 2026-10-11. Ride Maker is phone-first: import GPX, prepare and
-save a ride locally, then navigate offline with spoken turns and the screen
-locked. The website is an optional planning/sharing companion. A local ride
+Decision recorded 2026-10-11. Ride Maker is phone-first: create or import a ride, save it locally, and ultimately navigate offline
+with spoken turns and the screen locked. The website is an optional planning/sharing companion. A local ride
 must not require an account or the production website.
 
 This document defines the test strategy and acceptance policy. It does not
@@ -39,7 +38,7 @@ The Expo example is a reference; EAS Workflows is not required for our local run
 
 ## Current baseline
 
-As of 2026-10-12 (Tasks 002 and 003 accepted Android emulator baseline):
+As of 2026-10-14 (Tasks 002–004 accepted Android emulator baseline):
 
 - The existing app opens shared routes, renders MapLibre, and provides foreground
   guidance using `Location.watchPositionAsync` in `App.tsx`.
@@ -68,6 +67,17 @@ As of 2026-10-12 (Tasks 002 and 003 accepted Android emulator baseline):
   native picker, segmented previews, errors/cancel and byte-exact original
   persistence across cold restart with network blocked. Nine flows passed three
   fresh runs. Route preparation, offline maps and pure-engine replay remain pending.
+
+Task004 creation and library management are accepted on the Android emulator.
+Three fresh standalone runs passed all fourteen journeys; consumer isolation,
+negative demos and mid-offline signal/ownership checks passed their required outcomes. Its expanded suite contains
+fourteen journeys, including the runner-owned 09b offline subflow and 11b deletion
+subflow. Native evidence is tracked in
+[the task004 review](reviews/004-sol-mobile-creation-review.md). Focused `--flow`
+runs diagnose individual failures and do not count toward three final full passes.
+The library observation intent explicitly targets the test package because test
+and consumer apps share the same URI scheme. MapLibre overlays are omitted from the Android accessibility tree; creation
+markers require actual screenshot review.
 
 ## Test layers and what they prove
 
@@ -135,7 +145,7 @@ storage, including access after restart, rather than only seeding parsed data.
 
 Repository layout:
 
-- `apps/mobile/e2e/flows/`: committed Maestro flows (startup, invalid route, saved route, diagnostics, simulated ride, GPX import/preview, GPX persistence/offline, GPX import errors/cancel).
+- `apps/mobile/e2e/flows/`: committed Maestro flows (startup, invalid route, saved route, diagnostics, simulated ride, GPX import/preview, GPX persistence/offline, GPX import errors/cancel, creation permission recovery, preview/save, created offline/GPS navigation, library rename/delete).
 - `apps/mobile/e2e/fixtures/`: committed standard GPX fixtures (`standard-track.gpx`, `standard-route.gpx`, `malformed-syntax.gpx`).
 - `apps/mobile/src/fixtures/`: canonical JSON fixtures (`synthetic-routes.json`) used by the controlled local API and fixture unit tests.
 - `scripts/mobile-e2e/`: Mac runner (`run.sh`), synchronized native GPS feeder (`feed-gps.sh`), diagnostics verifier (`feed-diagnostics-gps.sh`), fixture server (`fixture-server.mjs`), manifest validator (`generate-manifests.mjs`).

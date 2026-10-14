@@ -15,8 +15,10 @@
   "dependencies": {
     "@maplibre/maplibre-react-native": "11.4.0",
     "@ride-maker/domain": "*",
+    "@ride-maker/geocoding": "*",
     "@ride-maker/gpx": "*",
     "@ride-maker/persistence": "*",
+    "@ride-maker/routing": "*",
     "expo": "57.0.25",
     "expo-dev-client": "~57.0.19",
     "expo-document-picker": "~57.0.3",

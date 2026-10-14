@@ -41,6 +41,7 @@ RUN_FAILURE_DEMO=false
 RUN_GPS_FAILURE_DEMO=false
 RUN_INEFFECTIVE_CUT_DEMO=false
 VERIFY_CONSUMER=false
+SELECTED_FLOW=""
 
 # Parse Arguments
 while [[ $# -gt 0 ]]; do
@@ -61,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       VERIFY_CONSUMER=true
       shift
       ;;
+    --flow)
+      SELECTED_FLOW="${2:?--flow requires a flow name}"
+      shift 2
+      ;;
     --demo-failure)
       RUN_FAILURE_DEMO=true
       shift
@@ -75,11 +80,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: $0 --serial <emulator-serial> [--build-apk] [--verify-consumer] [--demo-failure] [--demo-gps-failure] [--demo-ineffective-cut]" >&2
+      echo "Usage: $0 --serial <emulator-serial> [--build-apk] [--flow <name>] [--verify-consumer] [--demo-failure] [--demo-gps-failure] [--demo-ineffective-cut]" >&2
       exit 1
       ;;
   esac
 done
+
+if [[ -n "$SELECTED_FLOW" ]]; then
+  case "$SELECTED_FLOW" in
+    01-startup-and-diagnostics|02-invalid-route|03-saved-route-navigation|04a-diagnostics-permission-denied|04-diagnostics-lifecycle|05-simulated-ride|06-gpx-import-and-preview|07-gpx-persistence-and-offline|08-gpx-import-errors-and-cancel|09a-create-permission-denied|09-create-ride-and-preview|10-created-ride-navigation|11-library-management) ;;
+    *) echo "ERROR: Unknown focused flow '$SELECTED_FLOW'." >&2; exit 1 ;;
+  esac
+  if [[ "$VERIFY_CONSUMER" == "true" || "$RUN_FAILURE_DEMO" == "true" || "$RUN_GPS_FAILURE_DEMO" == "true" || "$RUN_INEFFECTIVE_CUT_DEMO" == "true" ]]; then
+    echo "ERROR: --flow cannot be combined with a consumer or negative verification mode." >&2
+    exit 1
+  fi
+fi
 
 # ---------------------------------------------------------
 # 1. Strict Safety & Device Verification
@@ -470,6 +486,8 @@ check_fixture_collision() {
 }
 
 RUN_ID="run-$(date +%Y%m%d-%H%M%S)"
+if [[ -n "$SELECTED_FLOW" ]]; then RUN_ID="${RUN_ID}-focused-${SELECTED_FLOW}"; fi
+
 if [[ "$RUN_FAILURE_DEMO" == "true" ]]; then
   RUN_ID="${RUN_ID}-failure-demo"
 elif [[ "$RUN_GPS_FAILURE_DEMO" == "true" ]]; then
@@ -813,14 +831,19 @@ run_flow() {
   echo ""
   echo ">>> Running flow: $flow_name"
 
-  # Reset process and data state cleanly for test isolation (except persistence flow 07)
-  if [[ "$flow_name" != "07-gpx-persistence-and-offline" ]]; then
+  # Reset process and data state cleanly for test isolation (except persistence flow 07 and task004 flows 09, 09b, 10, 11)
+  if [[ "$flow_name" != "07-gpx-persistence-and-offline" && "$flow_name" != "09b-created-offline-navigation" && "$flow_name" != "10-created-ride-navigation" && "$flow_name" != "11-library-management" ]]; then
     "$ADB" -s "$SERIAL" shell pm clear "$TEST_APP_ID" >/dev/null 2>&1 || true
     sleep 1
   fi
 
+  # Ensure task003 GPX fixtures are pushed before flow 09
+  if [[ "$flow_name" == "09-create-ride-and-preview" ]]; then
+    push_gpx_fixtures
+  fi
+
   # Handle special permission conditions for flow 04a
-  if [[ "$flow_name" == *"04a-diagnostics-permission-denied"* ]]; then
+  if [[ "$flow_name" == *"04a-diagnostics-permission-denied"* || "$flow_name" == "09a-create-permission-denied" ]]; then
     revoke_all_permissions
   else
     grant_all_permissions
@@ -876,6 +899,13 @@ run_flow() {
     push_gpx_fixtures
   fi
 
+  # The created GPS journey starts from saved disk data in a fresh process.
+  # Maestro clears logcat at launch: reusing the offline ride's PID would make
+  # the feeder's prior-session line offset skip the new subscription event.
+  if [[ "$flow_name" == "10-created-ride-navigation" ]]; then
+    "$ADB" -s "$SERIAL" shell am force-stop "$TEST_APP_ID"
+  fi
+
   # Start one process for this flow; Maestro keeps it alive with stopApp:false.
   "$ADB" -s "$SERIAL" shell am start -n "$TEST_APP_ID/.MainActivity" > "$flow_out_dir/launch.log"
   local app_pid=""
@@ -890,6 +920,10 @@ run_flow() {
   fi
   "$ADB" -s "$SERIAL" logcat --pid="$app_pid" -v time > "$flow_out_dir/app-logcat.log" 2>&1 &
   LOGCAT_PID=$!
+
+  if [[ "$flow_name" == "11-library-management" ]]; then
+    capture_storage_observation "management-before" "$flow_out_dir/storage-management-before.log"
+  fi
 
   # Launch companion feeders if required
   local CURRENT_FEEDER_PID=""
@@ -907,6 +941,11 @@ run_flow() {
     ADB="$ADB" "$SCRIPT_DIR/feed-diagnostics-gps.sh" --serial "$SERIAL" --pid "$app_pid" --artifacts-dir "$flow_out_dir" > "$ARTIFACTS_DIR/diagnostics-feeder.log" 2>&1 &
     CURRENT_FEEDER_PID=$!
     GPS_FEEDER_PID=$CURRENT_FEEDER_PID
+  elif [[ "$flow_name" == *"10-created-ride-navigation"* ]]; then
+    echo "Starting synchronized companion GPS feeder for created ride..."
+    ADB="$ADB" "$SCRIPT_DIR/feed-created-ride-gps.sh" --serial "$SERIAL" --pid "$app_pid" --flow-out-dir "$flow_out_dir" > "$ARTIFACTS_DIR/created-ride-gps-feeder.log" 2>&1 &
+    CURRENT_FEEDER_PID=$!
+    GPS_FEEDER_PID=$CURRENT_FEEDER_PID
   fi
 
   set +e
@@ -916,6 +955,19 @@ run_flow() {
   local flow_status=$?
   MAESTRO_PID=""
   set -e
+
+  # Observe the cold-restarted renamed record before deletion. Target the test
+  # package explicitly: consumer and test builds intentionally share a URI scheme.
+  if [[ "$flow_name" == "11-library-management" && $flow_status -eq 0 ]]; then
+    capture_storage_observation "management-renamed" "$flow_out_dir/storage-management-renamed.log"
+    set +e
+    "$MAESTRO" --device "$SERIAL" test --test-output-dir "$flow_out_dir" "$FLOWS_DIR/11b-library-delete.yaml" >> "$log_file" 2>&1 &
+    MAESTRO_PID=$!
+    wait "$MAESTRO_PID"
+    flow_status=$?
+    MAESTRO_PID=""
+    set -e
+  fi
 
   # Check feeder status if active
   local feeder_failed=false
@@ -935,6 +987,13 @@ run_flow() {
   wait "$LOGCAT_PID" 2>/dev/null || true
   LOGCAT_PID=""
 
+  if [[ "$flow_name" == "11-library-management" && $flow_status -eq 0 ]]; then
+    capture_storage_observation "management-after" "$flow_out_dir/storage-management-after.log"
+    node "$SCRIPT_DIR/verify-library-management.mjs" \
+      "$flow_out_dir/storage-management-before.log" "$flow_out_dir/storage-management-renamed.log" "$flow_out_dir/storage-management-after.log" \
+      "$REPO_ROOT/apps/mobile/e2e/fixtures" "$ARTIFACTS_DIR/library-management-verification.json"
+  fi
+
   # Restore network if persistence flow just finished
   if [[ "$flow_name" == "07-gpx-persistence-and-offline" ]]; then
     echo "Triggering test storage observation (after)..."
@@ -943,6 +1002,66 @@ run_flow() {
     verify_native_persistence "$flow_out_dir"
     restore_network
   fi
+
+  # Perform offline standalone cold restart verification for created route after flow 09
+  if [[ "$flow_name" == "09-create-ride-and-preview" && $flow_status -eq 0 ]]; then
+    echo "Running Created Offline Standalone Cold Restart verification..."
+    echo "Triggering test storage observation for created route (before)..."
+    capture_storage_observation "created-before" "$flow_out_dir/storage-observe-created-before.log"
+
+    echo "Cutting network to verify created route offline cold restart..."
+    cut_network
+
+    echo "Force-stopping app process to verify disk persistence of created route..."
+    "$ADB" -s "$SERIAL" shell am force-stop "$TEST_APP_ID"
+    sleep 2
+
+    echo "Restarting app offline..."
+    "$ADB" -s "$SERIAL" shell am start -n "$TEST_APP_ID/.MainActivity" > "$flow_out_dir/created-cold-restart.log"
+    sleep 3
+
+    # Wire 09b actual offline ride run BEFORE network restore!
+    if [[ -f "$FLOWS_DIR/09b-created-offline-navigation.yaml" ]]; then
+      echo "Running 09b-created-offline-navigation while network is severed..."
+      local offline_09b_dir="$ARTIFACTS_DIR/flows/09b-created-offline-navigation"
+      mkdir -p "$offline_09b_dir"
+      set +e
+      "$MAESTRO" --device "$SERIAL" test --test-output-dir "$offline_09b_dir" "$FLOWS_DIR/09b-created-offline-navigation.yaml" > "$ARTIFACTS_DIR/09b-created-offline-navigation.log" 2>&1 &
+      MAESTRO_PID=$!
+      wait "$MAESTRO_PID"
+      local offline_status=$?
+      MAESTRO_PID=""
+      set -e
+      if [[ $offline_status -ne 0 ]]; then
+        echo "ERROR: Created offline navigation failed with exit $offline_status."
+        FAILED_FLOWS+=("09b-created-offline-navigation")
+        flow_status=$offline_status
+      elif [[ ! -s "$offline_09b_dir/09b-offline-navigation-active.png" ]] && ! find "$offline_09b_dir" -name '09b-offline-navigation-active.png' -size +0c | grep -q .; then
+        echo "ERROR: Created offline navigation checkpoint is missing."
+        FAILED_FLOWS+=("09b-created-offline-navigation")
+        flow_status=1
+      else
+        PASSED_FLOWS+=("09b-created-offline-navigation")
+      fi
+      find "$offline_09b_dir" -type f -name "*.png" -exec cp {} "$ARTIFACTS_DIR/screenshots/" \; 2>/dev/null || true
+    else
+      echo "ERROR: Required created offline flow is missing."
+      flow_status=1
+    fi
+
+    echo "Triggering test storage observation for created route (after)..."
+    capture_storage_observation "created-after" "$flow_out_dir/storage-observe-created-after.log"
+
+    node "$SCRIPT_DIR/verify-persistence.mjs" \
+      --before "$flow_out_dir/storage-observe-created-before.log" \
+      --after "$flow_out_dir/storage-observe-created-after.log" \
+      --expect-created \
+      --output "$ARTIFACTS_DIR/persistence-created-verification.json"
+
+    echo "Restoring network after created route offline cold restart verification..."
+    restore_network
+  fi
+
 
   # Take end-of-flow screenshot
   local end_shot="$ARTIFACTS_DIR/screenshots/${flow_name}-end.png"
@@ -1034,6 +1153,46 @@ run_flow() {
         fi
       done
       ;;
+    09-create-ride-and-preview)
+      for exp in 09-create-route-preview.png 09-created-ride-detail.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    09a-create-permission-denied)
+      for exp in 09a-location-denied.png 09a-manual-location-recovery.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    09b-created-offline-navigation)
+      for exp in 09b-offline-navigation-active.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    10-created-ride-navigation)
+      for exp in 10-created-ride-turn-instruction.png 10-created-ride-progress.png 10-created-ride-off-route.png 10-created-ride-arrived.png 10-created-ride-navigation-ended.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
+    11-library-management)
+      for exp in 11-scrolling-library-last-row.png 11-rename-confirmed.png 11-delete-confirmed.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
   esac
 
   if [[ $flow_status -eq 0 ]] && [[ "$feeder_failed" == "false" ]] && [[ "$missing_checkpoint" == "false" ]]; then
@@ -1069,9 +1228,14 @@ else
     "$FLOWS_DIR/06-gpx-import-and-preview.yaml"
     "$FLOWS_DIR/07-gpx-persistence-and-offline.yaml"
     "$FLOWS_DIR/08-gpx-import-errors-and-cancel.yaml"
+    "$FLOWS_DIR/09a-create-permission-denied.yaml"
+    "$FLOWS_DIR/09-create-ride-and-preview.yaml"
+    "$FLOWS_DIR/10-created-ride-navigation.yaml"
+    "$FLOWS_DIR/11-library-management.yaml"
   )
 
   for flow in "${FLOWS[@]}"; do
+    if [[ -n "$SELECTED_FLOW" && "$(basename "$flow" .yaml)" != "$SELECTED_FLOW" ]]; then continue; fi
     if [[ -f "$flow" ]]; then
       run_flow "$flow"
     else

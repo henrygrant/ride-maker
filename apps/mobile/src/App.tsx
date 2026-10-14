@@ -19,14 +19,15 @@ import {
   observeLocalStorage,
   type LocalRouteRecord,
 } from "./storage";
+import { seedSyntheticLibrary } from "./storage/synthetic-library";
 
-export type DisplayRoute = {
-  id: string;
-  slug?: string;
-  kind?: "local" | "remote";
-  distanceMeters?: number;
-  document: RouteDocument;
-};
+import type { DisplayRoute } from "./types";
+import { RideLibraryScreen } from "./screens/RideLibraryScreen";
+import { CreateRideScreen } from "./screens/CreateRideScreen";
+import type { ControllerDraftSnapshot } from "./controllers/create-ride-controller";
+import { RideDetailScreen } from "./screens/RideDetailScreen";
+import { ActiveNavigationScreen } from "./screens/ActiveNavigationScreen";
+export type { DisplayRoute };
 
 const repository = createDefaultRouteRepository();
 const diagnosticStorage = new FileSystemDiagnosticStorage();
@@ -40,11 +41,12 @@ function getLocalStorage() {
 }
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<"routes" | "diagnostics">("routes");
+  const [viewMode, setViewMode] = useState<"routes" | "diagnostics" | "create">("routes");
   const [routes, setRoutes] = useState<SavedRoute[]>([]);
   const [localStorageError, setLocalStorageError] = useState<string | null>(null);
   const [localRoutes, setLocalRoutes] = useState<LocalRouteRecord[]>([]);
   const [route, setRoute] = useState<DisplayRoute | null>(null);
+  const [draftRide, setDraftRide] = useState<ControllerDraftSnapshot | null>(null);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +63,7 @@ export default function App() {
   const progressRef = useRef(0);
   const spokenRef = useRef(new Set<string>());
   const importInProgressRef = useRef(false);
+  const sampleCounterRef = useRef(0);
 
   const isTestMode = process.env.EXPO_PUBLIC_TEST_MODE === "true";
 
@@ -90,10 +93,22 @@ export default function App() {
     }
   }, []);
 
+  const handleSeedSyntheticLibrary = useCallback(async () => {
+    if (!isTestMode) return;
+    try {
+      const { storage } = getLocalStorage();
+      await seedSyntheticLibrary(storage);
+      await refreshLocalRoutes();
+    } catch (err) {
+      console.error("[SEED_SYNTHETIC_LIBRARY_ERROR]", err);
+    }
+  }, [isTestMode, refreshLocalRoutes]);
+
   const openRoute = useCallback(async (id: string) => {
     setTestMapRendered(false);
     setBusy(true);
     setError(null);
+    setTestMapRendered(false);
     try {
       setNavigating(false);
       const fetched = await repository.get(id);
@@ -115,6 +130,7 @@ export default function App() {
     setTestMapRendered(false);
     setBusy(true);
     setError(null);
+    setTestMapRendered(false);
     try {
       setNavigating(false);
       const { storage } = getLocalStorage();
@@ -122,6 +138,7 @@ export default function App() {
       setRoute({
         id: loaded.record.id,
         kind: "local",
+        sourceKind: loaded.record.sourceKind ?? "imported",
         distanceMeters: loaded.record.distanceMeters,
         document: loaded.document,
       });
@@ -164,6 +181,10 @@ export default function App() {
         setTestVerified(true);
         return;
       }
+      if (isTestMode && event.url === "ridemaker://test-seed-library") {
+        void handleSeedSyntheticLibrary();
+        return;
+      }
       if (isTestMode && event.url.includes("observe-storage")) {
         const tagMatch = event.url.match(/[?&]tag=([^&]+)/);
         const tag = tagMatch && tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "default";
@@ -180,6 +201,10 @@ export default function App() {
           setTestVerified(true);
           return;
         }
+        if (isTestMode && url === "ridemaker://test-seed-library") {
+          void handleSeedSyntheticLibrary();
+          return;
+        }
         if (isTestMode && url.includes("observe-storage")) {
           const tagMatch = url.match(/[?&]tag=([^&]+)/);
           const tag = tagMatch && tagMatch[1] ? decodeURIComponent(tagMatch[1]) : "default";
@@ -193,7 +218,7 @@ export default function App() {
     return () => {
       subscription.remove();
     };
-  }, [isTestMode, openRoute, emitTestObservation]);
+  }, [isTestMode, openRoute, emitTestObservation, handleSeedSyntheticLibrary]);
 
   const handleImportGpx = useCallback(async () => {
     if (importInProgressRef.current) return;
@@ -227,6 +252,7 @@ export default function App() {
       setRoute({
         id: loaded.record.id,
         kind: "local",
+        sourceKind: loaded.record.sourceKind ?? "imported",
         distanceMeters: loaded.record.distanceMeters,
         document: loaded.document,
       });
@@ -247,6 +273,34 @@ export default function App() {
     }
     void openRoute(id);
   }, [input, openRoute]);
+
+  const saveCreated = useCallback(async (document: RouteDocument) => {
+    const { storage } = getLocalStorage();
+    const record = await storage.saveCreatedRoute(document);
+    await refreshLocalRoutes();
+    setDraftRide(null);
+    setRoute({ id: record.id, kind: "local", sourceKind: "created", distanceMeters: record.distanceMeters, document });
+    setNavigating(false);
+    setTestMapRendered(false);
+    setViewMode("routes");
+  }, [refreshLocalRoutes]);
+
+  const renameRide = useCallback(async (name: string) => {
+    if (!route || route.kind !== "local") return;
+    const { storage } = getLocalStorage();
+    await storage.renameRoute(route.id, name);
+    const saved = await storage.getRoute(route.id);
+    setRoute({ ...route, document: saved.document });
+    await refreshLocalRoutes();
+  }, [route, refreshLocalRoutes]);
+
+  const deleteRide = useCallback(async () => {
+    if (!route || route.kind !== "local") return;
+    const { storage } = getLocalStorage();
+    await storage.deleteRoute(route.id);
+    setRoute(null);
+    await refreshLocalRoutes();
+  }, [route, refreshLocalRoutes]);
 
   const geometry = useMemo(() => (route ? routeGeometry(route.document) : null), [route]);
   const track = useMemo(() => (route ? buildNavigationTrack(route.document) : null), [route]);
@@ -299,11 +353,16 @@ export default function App() {
     if (!navigating || !track) return;
     let cancelled = false;
     let subscription: Location.LocationSubscription | null = null;
+
     void Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
       (location) => {
         if (cancelled) return;
         const { coords } = location;
+        if (isTestMode) {
+          sampleCounterRef.current += 1;
+          console.log(`[E2E_NAV_PROVIDER_SAMPLE] count=${sampleCounterRef.current} lat=${coords.latitude} lon=${coords.longitude}`);
+        }
         setPosition(coords);
         const accuracy = coords.accuracy ?? 100;
         const unreliable = accuracy > 100;
@@ -339,8 +398,15 @@ export default function App() {
       },
       (cause) => { if (!cancelled) setError(cause); },
     ).then((result) => {
-      if (cancelled) result.remove();
-      else subscription = result;
+      if (cancelled) {
+        result.remove();
+        if (isTestMode) {
+          console.log(`[E2E_NAV_PROVIDER] unsubscribed=true totalSamples=${sampleCounterRef.current}`);
+        }
+      } else {
+        subscription = result;
+        if (isTestMode) console.log("[E2E_NAV_PROVIDER] subscribed=true");
+      }
     }).catch((cause: unknown) => {
       if (!cancelled) {
         setNavigating(false);
@@ -349,10 +415,15 @@ export default function App() {
     });
     return () => {
       cancelled = true;
-      subscription?.remove();
+      if (subscription) {
+        subscription.remove();
+        if (isTestMode) {
+          console.log(`[E2E_NAV_PROVIDER] unsubscribed=true totalSamples=${sampleCounterRef.current}`);
+        }
+      }
       void Speech.stop();
     };
-  }, [navigating, track, voiceEnabled]);
+  }, [navigating, track, voiceEnabled, isTestMode]);
 
   useEffect(() => {
     if (navigating && position) {
@@ -385,169 +456,41 @@ export default function App() {
 
   const showDiagnosticsToggle = !route && (__DEV__ || process.env.EXPO_PUBLIC_ENABLE_DIAGNOSTICS === "true");
 
+  const backToLibrary = () => { stopNavigation(); setRoute(null); setViewMode("routes"); };
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
       <SafeAreaView style={styles.screen}>
-        <View style={styles.header}>
-          {route && <Pressable testID="button-back" accessibilityRole="button" accessibilityLabel="Back to routes" onPress={() => { stopNavigation(); setRoute(null); }}><Text style={styles.back}>‹ Routes</Text></Pressable>}
-          <Text testID="text-brand" style={styles.brand}>Ride Maker</Text>
+        {!route && viewMode !== "create" && <View style={styles.header}>
+          <Text testID="text-brand" style={styles.brand}>My rides</Text>
           {isTestMode && <Text testID="badge-test-mode" style={styles.testBadge}>TEST MODE</Text>}
-          {showDiagnosticsToggle && (
-            <Pressable
-              testID="button-diagnostics-toggle"
-              accessibilityRole="button"
-              accessibilityLabel={viewMode === "diagnostics" ? "Back to routes" : "Open diagnostics"}
-              onPress={() => {
-                void Speech.stop();
-                setViewMode((prev) => (prev === "routes" ? "diagnostics" : "routes"));
-              }}
-              style={styles.diagToggle}
-            >
-              <Text style={styles.diagToggleText}>
-                {viewMode === "diagnostics" ? "‹ Routes" : "Diagnostics"}
-              </Text>
-            </Pressable>
-          )}
-        </View>
-        {route ? (
-          <>
-            {navigating && <KeepScreenAwake />}
-            <View style={styles.routeHeader}>
-              <Text testID="text-route-title" style={styles.routeTitle}>{route.document.name}</Text>
-              {typeof distance === "number" && <Text testID="text-route-distance" style={styles.muted}>{(distance / 1000).toFixed(1)} km</Text>}
-            </View>
-            {route.kind === "local" && (
-              <View testID="view-guidance-notice" style={styles.guidanceNotice}>
-                <Text testID="text-guidance-notice" style={styles.guidanceNoticeText}>
-                  Route saved. Turn-by-turn guidance is coming next.
-                </Text>
-              </View>
-            )}
-            {navigating && <View testID="view-guidance" style={styles.guidance}>
-              <Text style={styles.guidanceDistance}>
-                {poorGps ? "Waiting for accurate GPS" : offRoute ? "Off route" : fix?.arrived ? "Arrived" : !fix ? "Locating…" : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters)}
-              </Text>
-              <Text style={styles.guidanceInstruction}>
-                {poorGps ? "Move to an open area." : offRoute ? "Return to the route line. Automatic rerouting isn't available yet." : fix?.arrived ? "You reached the end of the route." : fix?.next?.maneuver.instruction ?? (track?.maneuvers.length ? "Continue to finish" : "No turn directions saved with this route.")}
-              </Text>
-              {fix && !offRoute && !poorGps && <Text style={styles.guidanceRemaining}>{formatDistance(fix.remainingMeters)} remaining</Text>}
-            </View>}
-            {isTestMode && testMapRendered && <Text testID="test-map-rendered">MAP_RENDERED</Text>}
-            <View testID="view-map" style={styles.mapContainer}>
-              <Map
-                mapStyle="https://tiles.openfreemap.org/styles/liberty"
-                style={styles.map}
-                onDidFinishRenderingMapFully={() => {
-                  if (isTestMode) setTestMapRendered(true);
-                }}
-              >
-                <Camera
-                  key={route.id}
-                  ref={cameraRef}
-                  initialViewState={geometry?.bounds ? { bounds: geometry.bounds, padding: { top: 40, right: 40, bottom: 40, left: 40 } } : { center: [-73.9866, 40.7306], zoom: 10 }}
-                />
-                {geometry && <GeoJSONSource id="route" data={geometry.shape}>
-                  <Layer id="route-casing" type="line" paint={{ "line-color": "#ffffff", "line-width": 8 }} />
-                  <Layer id="route-line" type="line" paint={{ "line-color": "#ec4b35", "line-width": 5 }} />
-                </GeoJSONSource>}
-                {position && <GeoJSONSource id="rider" data={{ type: "Point", coordinates: [position.longitude, position.latitude] }}>
-                  <Layer id="rider-halo" type="circle" paint={{ "circle-color": "#ffffff", "circle-radius": 11 }} />
-                  <Layer id="rider-dot" type="circle" paint={{ "circle-color": "#1479c9", "circle-radius": 7 }} />
-                </GeoJSONSource>}
-              </Map>
-            </View>
-            {route.kind !== "local" && (
-              <View style={styles.navigationBar}>
-                {navigating && <Pressable testID="button-voice-toggle" accessibilityRole="button" accessibilityLabel={voiceEnabled ? "Mute voice guidance" : "Unmute voice guidance"} onPress={() => setVoiceEnabled((value) => !value)} style={styles.voiceButton}><Text style={styles.action}>{voiceEnabled ? "Mute" : "Unmute"}</Text></Pressable>}
-                <Pressable testID="button-navigation-toggle" accessibilityRole="button" accessibilityLabel={navigating ? "Stop navigation" : "Start navigation"} onPress={() => navigating ? stopNavigation() : void startNavigation()} style={[styles.button, styles.navigationButton]}>
-                  <Text style={styles.buttonText}>{navigating ? "Stop navigation" : "Start navigation"}</Text>
-                </Pressable>
-              </View>
-            )}
-            <Text style={styles.footer}>
-              {route.kind === "local"
-                ? "Saved route data is offline · foreground guidance only · maps require network"
-                : "Foreground guidance only · maps require network"}
-            </Text>
-          </>
-        ) : viewMode === "diagnostics" ? (
-          <DiagnosticsView testVerified={testVerified} testSamplesReady={testSamplesReady} onClearVerification={() => { setTestVerified(false); setTestSamplesReady(false); }} />
-        ) : (
-          <>
-            <View style={styles.importArea}>
-              <Pressable
-                testID="button-import-gpx"
-                accessibilityRole="button"
-                accessibilityLabel="Import GPX"
-                onPress={() => void handleImportGpx()}
-                style={[styles.button, styles.importButton]}
-              >
-                <Text style={styles.buttonText}>Import GPX file</Text>
-              </Pressable>
-            </View>
-            {localStorageError && <View testID="banner-storage-error" style={styles.inputArea}>
-              <Text>{localStorageError}</Text>
-              <Pressable testID="button-retry-saved-routes" accessibilityRole="button" accessibilityLabel="Retry saved routes" onPress={() => void refreshLocalRoutes()}><Text style={styles.action}>Retry</Text></Pressable>
-            </View>}
-            <View style={styles.inputArea}>
-              <Text style={styles.sectionTitle}>Open a route</Text>
-              <TextInput
-                testID="input-route-id"
-                accessibilityLabel="Route link or ID"
-                autoCapitalize="none"
-                autoCorrect={false}
-                onChangeText={setInput}
-                onSubmitEditing={openInput}
-                placeholder="Paste a route link or ID"
-                returnKeyType="go"
-                style={styles.input}
-                value={input}
-              />
-              <Pressable testID="button-view-route" accessibilityRole="button" accessibilityLabel="View route" onPress={openInput} style={styles.button}><Text style={styles.buttonText}>View route</Text></Pressable>
-            </View>
-            <View style={styles.listHeader}>
-              <Text testID="text-local-routes-section" style={styles.sectionTitle}>Saved routes</Text>
-              <Pressable onPress={() => void refreshLocalRoutes()}><Text style={styles.action}>Refresh</Text></Pressable>
-            </View>
-            <FlatList
-              data={localRoutes}
-              keyExtractor={(item) => item.id}
-              scrollEnabled={false}
-              ListEmptyComponent={<Text style={styles.empty}>No saved routes yet. Import a GPX file above.</Text>}
-              renderItem={({ item }) => (
-                <Pressable
-                  testID={`button-open-local-route-${item.id}`}
-                  onPress={() => void openLocalRoute(item.id)}
-                  style={styles.routeRow}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.routeName}>{item.name}</Text>
-                    {typeof item.distanceMeters === "number" && (
-                      <Text style={styles.muted}>{(item.distanceMeters / 1000).toFixed(1)} km</Text>
-                    )}
-                  </View>
-                  <Text style={styles.action}>View →</Text>
-                </Pressable>
-              )}
-            />
-            <View style={styles.listHeader}>
-              <Text style={styles.sectionTitle}>Public routes</Text>
-              <Pressable onPress={() => void refresh()}><Text style={styles.action}>Refresh</Text></Pressable>
-            </View>
-            <FlatList
-              data={routes}
-              keyExtractor={(item) => item.id}
-              ListEmptyComponent={<Text style={styles.empty}>No public routes yet. Unlisted routes can be opened with their link.</Text>}
-              renderItem={({ item }) => <Pressable onPress={() => void openRoute(item.id)} style={styles.routeRow}>
-                <Text style={styles.routeName}>{item.document.name}</Text>
-                <Text style={styles.action}>View →</Text>
-              </Pressable>}
-            />
-          </>
-        )}
-        {busy && <View style={styles.loading}><ActivityIndicator color="#ec4b35" /></View>}
-        {error && <Pressable testID="banner-error" accessibilityRole="button" accessibilityLabel="Dismiss error" onPress={() => setError(null)} style={styles.error}><Text style={styles.errorText}>{error}</Text></Pressable>}
+          {showDiagnosticsToggle && <Pressable testID="button-diagnostics-toggle" accessibilityRole="button"
+            accessibilityLabel={viewMode === "diagnostics" ? "Back to routes" : "Open diagnostics"}
+            onPress={() => setViewMode(viewMode === "diagnostics" ? "routes" : "diagnostics")} style={styles.diagToggle}>
+            <Text style={styles.diagToggleText}>{viewMode === "diagnostics" ? "‹ Routes" : "Diagnostics"}</Text>
+          </Pressable>}
+        </View>}
+        {route && navigating ? <>
+          <KeepScreenAwake />
+          <ActiveNavigationScreen route={route} track={track} fix={fix} offRoute={offRoute} poorGps={poorGps}
+            voiceEnabled={voiceEnabled} position={position} onToggleVoice={() => setVoiceEnabled(value => !value)}
+            onEndNavigation={stopNavigation} isTestMode={isTestMode} />
+        </> : route ? <RideDetailScreen key={route.id} route={route} onBack={backToLibrary}
+          onStartNavigation={() => void startNavigation()} onRenameRide={renameRide} onDeleteRide={deleteRide}
+          isTestMode={isTestMode} testMapRendered={testMapRendered} onMapRendered={() => setTestMapRendered(true)} />
+          : viewMode === "create" ? <CreateRideScreen initialDraft={draftRide} onSave={saveCreated}
+            onDraftChange={setDraftRide} onBack={discard => { if (discard) setDraftRide(null); setViewMode("routes"); }} isTestMode={isTestMode} />
+          : viewMode === "diagnostics" ? <DiagnosticsView testVerified={testVerified} testSamplesReady={testSamplesReady}
+            onClearVerification={() => { setTestVerified(false); setTestSamplesReady(false); }} />
+          : <RideLibraryScreen localRoutes={localRoutes} publicRoutes={routes} input={input} onInputChange={setInput}
+            onOpenInput={openInput} onOpenLocalRoute={id => void openLocalRoute(id)} onOpenPublicRoute={id => void openRoute(id)}
+            onCreateRide={() => setViewMode("create")} onImportGpx={() => void handleImportGpx()}
+            onRefreshLocalRoutes={() => void refreshLocalRoutes()} onRefreshPublicRoutes={() => void refresh()}
+            onSeedSyntheticLibrary={isTestMode ? handleSeedSyntheticLibrary : undefined}
+            localStorageError={localStorageError} isTestMode={isTestMode} />}
+        {busy && <View style={styles.loading}><ActivityIndicator color="#ec4b35" size="large" /></View>}
+        {error && <Pressable testID="banner-error" accessibilityRole="button" accessibilityLabel="Dismiss error"
+          onPress={() => setError(null)} style={styles.error}><Text style={styles.errorText}>{error}</Text></Pressable>}
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -564,7 +507,7 @@ const styles = StyleSheet.create({
   header: { minHeight: 58, paddingHorizontal: 20, flexDirection: "row", alignItems: "center", gap: 16, borderBottomWidth: 1, borderBottomColor: "#ddd9d0" },
   brand: { fontSize: 19, fontWeight: "700", color: "#1b2521" },
   back: { color: "#ec4b35", fontSize: 16, fontWeight: "600" },
-  diagToggle: {
+  diagToggle: { minHeight: 44, minWidth: 44, justifyContent: "center",
     marginLeft: "auto",
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -603,7 +546,7 @@ const styles = StyleSheet.create({
   routeName: { fontSize: 16, fontWeight: "600", color: "#1b2521" },
   empty: { padding: 20, textAlign: "center", color: "#69736f", fontStyle: "italic" },
   loading: { ...StyleSheet.absoluteFill, backgroundColor: "rgba(255,255,255,0.7)", alignItems: "center", justifyContent: "center" },
-  error: { margin: 20, padding: 12, backgroundColor: "#fde8e8", borderRadius: 8, borderWidth: 1, borderColor: "#f8b4b4" },
+  error: { minHeight: 44, justifyContent: "center", margin: 20, padding: 12, backgroundColor: "#fde8e8", borderRadius: 8, borderWidth: 1, borderColor: "#f8b4b4" },
   errorText: { color: "#9b1c1c", fontSize: 14 },
   footer: { padding: 12, textAlign: "center", fontSize: 12, color: "#69736f", backgroundColor: "#fff", borderTopWidth: 1, borderTopColor: "#ddd9d0" },
 });

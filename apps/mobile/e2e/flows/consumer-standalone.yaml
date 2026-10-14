@@ -7,6 +7,14 @@ appId: net.thg3.ridemaker
       id: "text-brand"
     timeout: 20000
 - assertVisible:
+    id: "button-create-ride"
+- assertVisible:
+    id: "button-import-gpx"
+- assertNotVisible:
+    id: "button-test-seed-library"
+- tapOn:
+    id: "button-toggle-secondary-links"
+- assertVisible:
     id: "input-route-id"
 - assertVisible:
     id: "button-view-route"

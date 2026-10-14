@@ -1,0 +1,61 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+    permissions:
+      all: unset
+- tapOn:
+    id: "button-create-ride"
+- tapOn:
+    id: "button-use-my-location-start"
+- tapOn:
+    id: "com.android.permissioncontroller:id/permission_deny_button"
+- extendedWaitUntil:
+    visible: "Location permission denied. Search for an address or choose on the map."
+    timeout: 10000
+- takeScreenshot: 09a-location-denied
+- scrollUntilVisible:
+    element:
+      id: "button-preview-route"
+    direction: DOWN
+- tapOn:
+    id: "button-preview-route"
+- assertVisible: "Please choose a start location."
+- assertNotVisible:
+    id: "button-save-created-ride"
+- scrollUntilVisible:
+    element:
+      id: "input-start-location"
+    direction: UP
+- tapOn:
+    id: "input-start-location"
+- inputText: "Central Park Loop"
+- hideKeyboard
+- tapOn:
+    id: "search-item-1001"
+- scrollUntilVisible:
+    element:
+      id: "input-finish-location"
+    direction: DOWN
+- tapOn:
+    id: "input-finish-location"
+- inputText: "Sheep Meadow"
+- hideKeyboard
+- tapOn:
+    id: "search-item-1002"
+- scrollUntilVisible:
+    element:
+      id: "button-preview-route"
+    direction: DOWN
+- tapOn:
+    id: "button-preview-route"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-distance"
+    timeout: 15000
+- assertVisible:
+    id: "button-save-created-ride"
+- assertNotVisible:
+    id: "view-guidance"
+- takeScreenshot: 09a-manual-location-recovery

@@ -1,28 +1,30 @@
 # Ride Maker
 
 Phone-first cycling navigation, with an optional web route planner. The current
-mobile app is a route viewer with foreground guidance; the local GPX/offline
-workflow is the next product goal.
+mobile app creates and stores rides locally, imports GPX previews, and provides
+foreground guidance for routes with saved directions.
 
 ## Workspaces
 
 - `apps/web` — Vite web planner
-- `apps/mobile` — Expo/React Native route viewer
+- `apps/mobile` — Expo/React Native ride library, creation and navigation
 - `packages/ui` — shared React Strict DOM components and design tokens
 - `packages/domain` and `packages/persistence` — shared route format and PocketBase access
 
-The mobile app can list public routes or open any unlisted route by pasting
-its Ride Maker link or route ID. It does not edit routes. Since routes finished
-on the web are currently saved as **unlisted**, the public list may be empty;
-use a link to open one.
+The phone opens **My rides**, with **Create ride** as the primary action and
+**Import GPX** as a secondary option. Creation supports place search, explicit map
+selection, optional stops and loops, followed by Preview and Save. Rename and
+confirmed deletion live in ride detail. No account is required for local rides.
+Shared Ride Maker links and public routes remain available in a collapsed section;
+web-created routes are unlisted by default, so the public list can be empty.
 
-For routed documents with saved maneuvers, **Start navigation** follows the
-route with foreground GPS and speaks upcoming turns. The screen stays awake
-while navigation is active. It warns when the rider leaves the route but does
-not reroute automatically. Routes without saved maneuvers can still be
-followed on the map, without turn prompts. Guidance stops when the app is
-backgrounded or the screen is locked; do not rely on it as the sole source of
-directions while riding.
+For created or shared documents with valid saved maneuvers, **Ride** follows the
+route with foreground GPS and spoken turns. Mute and Stop navigation remain on
+the active ride screen; Back/Stop asks for confirmation. Raw GPX imports remain
+previews until turn preparation is implemented. Saved route data and instructions
+reopen without network; place search, routing and map tiles require network.
+Off-route warnings do not reroute automatically. Locked-screen GPS/audio, offline
+map packs and real riding conditions still need separate acceptance.
 
 ## Mobile development
 
@@ -36,7 +38,7 @@ npm run dev --workspace @ride-maker/mobile
 ```
 
 On macOS with Xcode, use `npm run ios --workspace @ride-maker/mobile` instead.
-The viewer reads routes from `https://ridemaker.thg3.net/api`. A custom URL such
+Shared-route access reads routes from `https://ridemaker.thg3.net/api`. A custom URL such
 as `ridemaker://route/ROUTE_ID` also opens a route. Web links currently need to
 be pasted into the app; universal/app links are not configured yet.
 
@@ -46,8 +48,9 @@ task handoffs. The
 [mobile testing strategy](docs/mobile-testing.md) defines emulator/agent access,
 Maestro flows, ride replay, standalone checks, and physical acceptance gates.
 The [background navigation spike](docs/tasks/001-background-spike.md) awaits field
-checks; [task 002](docs/tasks/002-mobile-test-foundation.md) defines the testing
-foundation to build before further mobile features.
+checks. [Task 004](docs/tasks/004-mobile-ride-creation.md) and its
+[review record](docs/reviews/004-sol-mobile-creation-review.md) track mobile creation
+and its expanded native acceptance suite.
 
 ## Commands
 

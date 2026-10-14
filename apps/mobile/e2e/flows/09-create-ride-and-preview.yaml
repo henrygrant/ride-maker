@@ -1,0 +1,254 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# Preserve byte-exact imports alongside the UI-created ride through all later tests.
+- runFlow: "07-seed-persistence.yaml"
+
+# 1. Open Create Ride screen
+- tapOn:
+    id: "button-create-ride"
+- assertVisible: "Create Ride"
+- assertVisible:
+    id: "input-created-ride-name"
+- assertVisible:
+    id: "view-create-map"
+
+# 2. Test Map Placement candidate movement, confirmation, cancel, and recovery
+- tapOn:
+    id: "button-map-pick-start"
+- assertVisible:
+    id: "button-cancel-map-placement"
+- assertVisible:
+    id: "button-confirm-map-placement"
+# Tap on map to set candidate point and confirm it
+- tapOn:
+    id: "view-create-map"
+- tapOn:
+    id: "button-confirm-map-placement"
+- extendedWaitUntil:
+    visible: "Map-selected place"
+    timeout: 10000
+
+# Test map pick again and cancel
+- tapOn:
+    id: "button-map-pick-start"
+- assertVisible:
+    id: "button-cancel-map-placement"
+- tapOn:
+    id: "button-cancel-map-placement"
+- assertNotVisible:
+    id: "button-cancel-map-placement"
+
+# Confirm a map choice through the production handler, then replace it with search.
+- tapOn:
+    id: "button-map-pick-start"
+- tapOn:
+    id: "view-create-map"
+- tapOn:
+    id: "button-confirm-map-placement"
+- assertNotVisible:
+    id: "button-confirm-map-placement"
+
+# Search failure/no results retain the draft and allow a subsequent search.
+- tapOn:
+    id: "input-start-location"
+- eraseText: 100
+- inputText: "empty"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: 'No results found for "empty".'
+    timeout: 10000
+- tapOn:
+    id: "input-start-location"
+- eraseText: 100
+- inputText: "fail"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: "Place search failed .*"
+    timeout: 10000
+
+# 3. Controlled geocoding search failure, no-results, and recovery
+# 3a. Search error recovery (fixture mode "fail")
+- tapOn:
+    id: "input-start-location"
+- eraseText: 50
+- inputText: "fail"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "text-search-error-start"
+    timeout: 10000
+
+# 3b. No results feedback (fixture mode "empty")
+- tapOn:
+    id: "input-start-location"
+- eraseText: 50
+- inputText: "empty"
+- hideKeyboard
+- extendedWaitUntil:
+    visible: 'No results found for "empty".'
+    timeout: 10000
+
+# 3c. Valid search recovery and selection
+- tapOn:
+    id: "input-start-location"
+- eraseText: 50
+- inputText: "Central Park Loop"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1001"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1001"
+- assertNotVisible:
+    id: "text-search-error-start"
+
+# 4. Enter ride name
+- tapOn:
+    id: "input-created-ride-name"
+- eraseText: 50
+- inputText: "Morning River Loop"
+- hideKeyboard
+
+# 5. Add via stop with selectable search
+- tapOn:
+    id: "button-add-stop"
+- scrollUntilVisible:
+    element:
+      id: "input-stop-0"
+    direction: DOWN
+- assertVisible:
+    id: "input-stop-0"
+- tapOn:
+    id: "input-stop-0"
+- eraseText: 50
+- inputText: "Sheep Meadow"
+- hideKeyboard
+- extendedWaitUntil:
+    visible:
+      id: "search-item-1002"
+    timeout: 10000
+- tapOn:
+    id: "search-item-1002"
+
+# 6. Make loop ride
+- scrollUntilVisible:
+    element:
+      id: "button-make-loop"
+    direction: DOWN
+- tapOn:
+    id: "button-make-loop"
+- assertVisible: "✓ Loop Ride"
+
+# 7. Preview Route (enters Preview mode)
+- scrollUntilVisible:
+    element:
+      id: "button-preview-route"
+    direction: DOWN
+- tapOn:
+    id: "button-preview-route"
+- extendedWaitUntil:
+    visible:
+      id: "text-preview-distance"
+    timeout: 15000
+- assertVisible:
+    id: "text-preview-turns"
+- assertVisible:
+    id: "button-edit-points"
+- assertVisible:
+    id: "button-save-created-ride"
+- takeScreenshot: 09-create-route-preview
+
+# 8. Test Edit points toggle back to Edit mode and stale-save prevention
+- tapOn:
+    id: "button-edit-points"
+- assertVisible: "Create Ride"
+- assertVisible:
+    id: "button-preview-route"
+- assertNotVisible:
+    id: "button-save-created-ride"
+
+# Editing the selected point clears its coordinates and rejects the old preview.
+- scrollUntilVisible:
+    element:
+      id: "input-start-location"
+    direction: UP
+- tapOn:
+    id: "input-start-location"
+- eraseText: 100
+- inputText: "empty"
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "button-preview-route"
+    direction: DOWN
+- tapOn:
+    id: "button-preview-route"
+- assertVisible: "Please choose a start location."
+- assertNotVisible:
+    id: "button-save-created-ride"
+- scrollUntilVisible:
+    element:
+      id: "input-start-location"
+    direction: UP
+- tapOn:
+    id: "input-start-location"
+- eraseText: 100
+- inputText: "Central Park Loop"
+- hideKeyboard
+- tapOn:
+    id: "search-item-1001"
+
+# 9. Test Draft Keep on Back
+- tapOn:
+    id: "button-create-back"
+- assertVisible: "Keep your draft?"
+- tapOn:
+    id: "button-draft-keep"
+- assertVisible:
+    id: "text-brand"
+
+# 10. Reopen Create Ride to verify draft preserved
+- tapOn:
+    id: "button-create-ride"
+- assertVisible: "Morning River Loop"
+
+# 11. Preview again and Save Ride
+- scrollUntilVisible:
+    element:
+      id: "button-preview-route"
+    direction: DOWN
+- tapOn:
+    id: "button-preview-route"
+- extendedWaitUntil:
+    visible:
+      id: "button-save-created-ride"
+    timeout: 15000
+- tapOn:
+    id: "button-save-created-ride"
+
+# 12. Verify transition to Ride Detail surface with guidance ready
+- extendedWaitUntil:
+    visible:
+      id: "text-route-title"
+    timeout: 15000
+- assertVisible: "Morning River Loop"
+- assertVisible:
+    id: "button-navigation-toggle"
+- assertVisible: "Ride"
+- assertNotVisible:
+    id: "text-guidance-notice"
+- takeScreenshot: 09-created-ride-detail
+
+# 13. Return to library
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible: "Morning River Loop"

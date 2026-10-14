@@ -1,0 +1,44 @@
+appId: net.thg3.ridemaker.e2e
+---
+# 5. Test Delete Cancellation and Confirmation
+- tapOn: "Morning River Sunset Loop"
+- assertVisible:
+    id: "button-delete-ride"
+- tapOn:
+    id: "button-delete-ride"
+
+# Assert confirmation modal names the ride
+- assertVisible:
+    id: "text-delete-confirm-message"
+- assertVisible: 'Are you sure you want to delete "Morning River Sunset Loop"?'
+
+# Cancel delete: ride remains intact
+- tapOn:
+    id: "button-delete-cancel"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Morning River Sunset Loop"
+
+# Confirm delete
+- tapOn:
+    id: "button-delete-ride"
+- tapOn:
+    id: "button-delete-confirm"
+
+# Verify ride is deleted and removed from library
+- assertVisible:
+    id: "text-brand"
+- assertNotVisible: "Morning River Sunset Loop"
+
+# Verify remaining records are intact and accessible
+- scrollUntilVisible:
+    element: "Pacific Coast Highway Scenic Vista Route from San Francisco to Santa Cruz with Ocean Overlooks and Headwinds"
+    direction: UP
+    timeout: 15000
+- assertVisible: "Pacific Coast Highway Scenic Vista Route from San Francisco to Santa Cruz with Ocean Overlooks and Headwinds"
+- scrollUntilVisible:
+    element: "Columbia River Basin Endurance Circuit Traversed Through Rolling Wheat Valleys"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: "Columbia River Basin Endurance Circuit Traversed Through Rolling Wheat Valleys"
+- takeScreenshot: 11-delete-confirmed

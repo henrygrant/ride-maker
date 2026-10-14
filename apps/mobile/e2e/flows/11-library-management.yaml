@@ -1,0 +1,76 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# 1. Seed synthetic library with 14+ rides and long names (test-only seam)
+- tapOn:
+    id: "button-test-seed-library"
+- extendedWaitUntil:
+    visible: "Pacific Coast Highway Scenic Vista Route from San Francisco to Santa Cruz with Ocean Overlooks and Headwinds"
+    timeout: 10000
+
+# 2. Real scrolling library test: scroll to bottom and open last row
+- scrollUntilVisible:
+    element: "Columbia River Basin Endurance Circuit Traversed Through Rolling Wheat Valleys"
+    direction: DOWN
+    timeout: 15000
+- tapOn: "Columbia River Basin Endurance Circuit Traversed Through Rolling Wheat Valleys"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Columbia River Basin Endurance Circuit Traversed Through Rolling Wheat Valleys"
+- takeScreenshot: 11-scrolling-library-last-row
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+
+# 3. Rename test on primary UI-created ride
+- scrollUntilVisible:
+    element: "Morning River Loop"
+    direction: UP
+    timeout: 15000
+- tapOn: "Morning River Loop"
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Morning River Loop"
+
+# Test Rename Modal
+- tapOn:
+    id: "button-rename-ride"
+- assertVisible: "Rename Ride"
+- assertVisible:
+    id: "input-rename-ride-name"
+- tapOn:
+    id: "input-rename-ride-name"
+- eraseText: 50
+- inputText: "Morning River Sunset Loop"
+- hideKeyboard
+- tapOn:
+    id: "button-rename-confirm"
+
+# Verify title updated in UI
+- assertVisible:
+    id: "text-route-title"
+- assertVisible: "Morning River Sunset Loop"
+- takeScreenshot: 11-rename-confirmed
+
+# 4. Verify across cold app restart with scroll
+- tapOn:
+    id: "button-back"
+- stopApp
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+- scrollUntilVisible:
+    element: "Morning River Sunset Loop"
+    direction: DOWN
+    timeout: 15000
+- assertVisible: "Morning River Sunset Loop"
+
+# Runner captures package-targeted storage evidence here, then runs 11b.

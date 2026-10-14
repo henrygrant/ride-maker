@@ -1,0 +1,49 @@
+appId: net.thg3.ridemaker.e2e
+---
+- launchApp:
+    stopApp: false
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+
+# Open Morning River Loop while offline
+- assertVisible: "Morning River Loop"
+- tapOn: "Morning River Loop"
+
+# Verify Ride Detail loads offline without remote dependency
+- extendedWaitUntil:
+    visible:
+      id: "text-route-title"
+    timeout: 10000
+- assertVisible: "Morning River Loop"
+- assertVisible:
+    id: "button-navigation-toggle"
+- assertVisible: "Ride"
+
+# Tap Ride to start active navigation with network cut
+- tapOn:
+    id: "button-navigation-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "view-guidance"
+    timeout: 10000
+- assertVisible:
+    id: "text-guidance-instruction"
+- takeScreenshot: 09b-offline-navigation-active
+
+# End navigation: tap Stop navigation and confirm modal
+- tapOn:
+    id: "button-navigation-toggle"
+- assertVisible: "End this ride?"
+- tapOn:
+    id: "button-end-ride-confirm"
+
+# Return to library
+- extendedWaitUntil:
+    visible:
+      id: "text-route-title"
+    timeout: 10000
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"

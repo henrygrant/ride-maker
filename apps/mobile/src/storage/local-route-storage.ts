@@ -1,4 +1,5 @@
 import { ROUTE_DOCUMENT_SCHEMA_VERSION, type RouteDocument } from "@ride-maker/domain";
+import { serializeGpx } from "@ride-maker/gpx";
 import type { FileSystemInterface } from "./file-system-interface";
 import {
   LOCAL_RECORD_VERSION,
@@ -53,6 +54,7 @@ export class LocalRouteStorage {
       await this.fs.makeDirectoryAsync(`${this.baseDir}/_staging`, { intermediates: true });
       await this.fs.makeDirectoryAsync(`${this.baseDir}/data`, { intermediates: true });
 
+      await this.recoverInterruptedOperations();
       await this.cleanStagingOrphans();
       await this.cleanDataOrphans();
       this.initialized = true;
@@ -100,6 +102,8 @@ export class LocalRouteStorage {
         ...(originalFilename !== undefined ? { originalFilename } : {}),
         originalGpxPath,
         snapshotPath,
+        sourceKind: "imported",
+        hasInstructions: false,
       };
 
       const existingRecord = await this.db.getRoute(routeId);
@@ -116,15 +120,21 @@ export class LocalRouteStorage {
           dirCreated = true;
         }
 
-        if (stagedGpxPath && this.fs.copyAsync) {
-          await this.fs.copyAsync({ from: stagedGpxPath, to: originalGpxPath });
-        } else if (stagedGpxPath) {
-          const content = await this.fs.readAsStringAsync(stagedGpxPath);
-          await this.fs.writeAsStringAsync(originalGpxPath, content);
-        } else if (gpxContent !== undefined) {
+        if (stagedGpxPath) {
+          const stagedInfo = await this.fs.getInfoAsync(stagedGpxPath);
+          if (!stagedInfo.exists) {
+            throw new Error("Staged GPX file does not exist.");
+          }
+          if (this.fs.copyAsync) {
+            await this.fs.copyAsync({ from: stagedGpxPath, to: originalGpxPath });
+          } else {
+            const content = await this.fs.readAsStringAsync(stagedGpxPath);
+            await this.fs.writeAsStringAsync(originalGpxPath, content);
+          }
+        } else if (typeof gpxContent === "string") {
           await this.fs.writeAsStringAsync(originalGpxPath, gpxContent);
         } else {
-          throw new Error("No GPX content or staged file provided.");
+          throw new Error("Either stagedGpxPath or gpxContent must be provided.");
         }
 
         await this.fs.writeAsStringAsync(snapshotPath, JSON.stringify(document));
@@ -135,12 +145,10 @@ export class LocalRouteStorage {
           throw new Error("Failed to verify written route files.");
         }
 
-        // SQLite commit only after all durable assets are written
         await this.db.insertRoute(record);
         return record;
       } catch (cause) {
-        // Prevent deleting valid existing assets on ID collision or repeated save
-        if (dirCreated && !alreadyExisted) {
+        if (dirCreated) {
           try {
             await this.fs.deleteAsync(targetDir, { idempotent: true });
           } catch {
@@ -149,6 +157,159 @@ export class LocalRouteStorage {
         }
         throw cause;
       }
+    });
+  }
+
+  async saveCreatedRoute(
+    document: RouteDocument,
+    options?: { createdAt?: string },
+  ): Promise<LocalRouteRecord> {
+    if (!this.initialized) await this.init();
+
+    return this.runSerialized(async () => {
+      if (!isValidRouteDocument(document)) {
+        throw new Error("Invalid route document: cannot save malformed route.");
+      }
+
+      const routeId = document.id;
+      const targetDir = `${this.baseDir}/data/${routeId}`;
+      const originalGpxPath = `${targetDir}/original.gpx`;
+      const snapshotPath = `${targetDir}/route.json`;
+
+      const existingRecord = await this.db.getRoute(routeId);
+      const existingDir = await this.fs.getInfoAsync(targetDir);
+      if (Boolean(existingRecord) || existingDir.exists) {
+        throw new Error("A route with this ID already exists. Existing route data was preserved.");
+      }
+
+      const pointCount = document.segments.reduce((sum, s) => sum + s.points.length, 0);
+      const segmentCount = document.segments.length;
+      const distanceMeters =
+        typeof document.summary?.distanceMeters === "number" &&
+        Number.isFinite(document.summary.distanceMeters) &&
+        document.summary.distanceMeters >= 0
+          ? document.summary.distanceMeters
+          : 0;
+
+      const instructionCheck = validateRouteInstructions(document);
+      const hasInstructions = instructionCheck.ready;
+
+      const record: LocalRouteRecord = {
+        id: routeId,
+        version: LOCAL_RECORD_VERSION,
+        name: document.name,
+        distanceMeters,
+        pointCount,
+        segmentCount,
+        createdAt: options?.createdAt ?? new Date().toISOString(),
+        originalGpxPath,
+        snapshotPath,
+        sourceKind: "created",
+        hasInstructions,
+      };
+
+      const derivedGpx = serializeGpx(document);
+      let dirCreated = false;
+      try {
+        await this.fs.makeDirectoryAsync(targetDir, { intermediates: true });
+        dirCreated = true;
+
+        await this.fs.writeAsStringAsync(originalGpxPath, derivedGpx);
+        await this.fs.writeAsStringAsync(snapshotPath, JSON.stringify(document));
+
+        const gpxInfo = await this.fs.getInfoAsync(originalGpxPath);
+        const snapInfo = await this.fs.getInfoAsync(snapshotPath);
+        if (!gpxInfo.exists || !snapInfo.exists) {
+          throw new Error("Failed to verify written created route files.");
+        }
+
+        await this.db.insertRoute(record);
+        return record;
+      } catch (cause) {
+        if (dirCreated) {
+          try {
+            await this.fs.deleteAsync(targetDir, { idempotent: true });
+          } catch {
+            // Ignore deletion error during rollback
+          }
+        }
+        throw cause;
+      }
+    });
+  }
+
+  async renameRoute(id: string, newName: string): Promise<LocalRouteRecord> {
+    if (!this.initialized) await this.init();
+
+    return this.runSerialized(async () => {
+      const trimmed = newName.trim();
+      if (trimmed.length === 0) {
+        throw new Error("Ride name cannot be empty.");
+      }
+
+      const current = await this.getRoute(id);
+      const oldName = current.record.name;
+      if (oldName === trimmed) {
+        return current.record;
+      }
+
+      const snapshotPath = current.record.snapshotPath;
+      const tmpSnapshot = `${snapshotPath}.tmp`;
+      const bakSnapshot = `${snapshotPath}.bak`;
+
+      // Check if an unresolved journal already exists: refuse operation until safely resolved
+      const bakInfo = await this.fs.getInfoAsync(bakSnapshot);
+      if (bakInfo.exists) {
+        throw new Error("Cannot rename: unresolved backup journal exists for route. Restart application to recover.");
+      }
+
+      const updatedDoc: RouteDocument = {
+        ...current.document,
+        name: trimmed,
+      };
+
+      // 1. Stage new snapshot to .tmp
+      await this.fs.writeAsStringAsync(tmpSnapshot, JSON.stringify(updatedDoc));
+
+      // 2. Backup current live snapshot to .bak
+      const originalSnapshotContent = JSON.stringify(current.document);
+      await this.fs.writeAsStringAsync(bakSnapshot, originalSnapshotContent);
+
+      try {
+        // 3. Replace live snapshot with updated content
+        await this.fs.writeAsStringAsync(snapshotPath, JSON.stringify(updatedDoc));
+        try {
+          await this.fs.deleteAsync(tmpSnapshot, { idempotent: true });
+        } catch {
+          // Non-fatal tmp cleanup
+        }
+
+        // 4. Update SQLite database record
+        await this.db.updateRouteName(id, trimmed);
+
+        // 5. Success: safely clean backup
+        try {
+          await this.fs.deleteAsync(bakSnapshot, { idempotent: true });
+        } catch {
+          // Non-fatal backup removal
+        }
+      } catch (err) {
+        // Rollback on caught failure
+        try {
+          await this.fs.writeAsStringAsync(snapshotPath, originalSnapshotContent);
+          // Only delete backup if live snapshot was successfully restored
+          await this.fs.deleteAsync(bakSnapshot, { idempotent: true });
+          await this.fs.deleteAsync(tmpSnapshot, { idempotent: true });
+        } catch {
+          // If rollback write fails, retain .bak for startup recovery
+        }
+        throw err;
+      }
+
+      return {
+        ...current.record,
+        name: trimmed,
+      };
     });
   }
 
@@ -165,7 +326,7 @@ export class LocalRouteStorage {
       throw new SavedRouteNotFoundError(`Saved route '${id}' was not found.`);
     }
 
-    if (record.version !== LOCAL_RECORD_VERSION) {
+    if (record.version !== 1 && record.version !== 2) {
       throw new SavedRouteCorruptError(
         `Unsupported local route record version: ${record.version}`,
       );
@@ -245,6 +406,25 @@ export class LocalRouteStorage {
       );
     }
 
+    // Sol review: Check names and provenance consistency at load
+    if (record.name !== document.name) {
+      throw new SavedRouteCorruptError(
+        `Saved route metadata name '${record.name}' does not match document name '${document.name}'.`,
+      );
+    }
+
+    if (record.sourceKind === "created" && document.source.kind !== "new") {
+      throw new SavedRouteCorruptError(
+        `Saved route record provenance 'created' does not match document source '${document.source.kind}'.`,
+      );
+    }
+
+    if (record.sourceKind === "imported" && document.source.kind !== "gpx") {
+      throw new SavedRouteCorruptError(
+        `Saved route record provenance 'imported' does not match document source '${document.source.kind}'.`,
+      );
+    }
+
     let originalGpx: string;
     try {
       const gpxInfo = await this.fs.getInfoAsync(record.originalGpxPath);
@@ -266,13 +446,70 @@ export class LocalRouteStorage {
 
   async deleteRoute(id: string): Promise<void> {
     if (!this.initialized) await this.init();
-    const targetDir = `${this.baseDir}/data/${id}`;
-    try {
-      await this.fs.deleteAsync(targetDir, { idempotent: true });
-    } catch {
-      // Ignore directory removal failure
+    return this.runSerialized(async () => {
+      // 1. Commit DB deletion FIRST: removes from library index immediately.
+      await this.db.deleteRoute(id);
+
+      // 2. Safely clean disk assets.
+      const targetDir = `${this.baseDir}/data/${id}`;
+      try {
+        await this.fs.deleteAsync(targetDir, { idempotent: true });
+      } catch {
+        // Non-fatal; orphaned directory will be cleaned by cleanDataOrphans
+      }
+    });
+  }
+
+  private async recoverInterruptedOperations(): Promise<void> {
+    const dataDir = `${this.baseDir}/data`;
+    if (!this.fs.readDirectoryAsync) return;
+    const entries = await this.fs.readDirectoryAsync(dataDir);
+    for (const entry of entries) {
+      const itemDir = `${dataDir}/${entry}`;
+      const itemInfo = await this.fs.getInfoAsync(itemDir);
+      if (!itemInfo.isDirectory) continue;
+
+      // Clean stale temporary files
+      const tmpPath = `${itemDir}/route.json.tmp`;
+      const tmpInfo = await this.fs.getInfoAsync(tmpPath);
+      if (tmpInfo.exists) {
+        try {
+          await this.fs.deleteAsync(tmpPath, { idempotent: true });
+        } catch {
+          // ignore
+        }
+      }
+
+      // Recover backup if present
+      const bakPath = `${itemDir}/route.json.bak`;
+      const bakInfo = await this.fs.getInfoAsync(bakPath);
+      if (bakInfo.exists) {
+        const livePath = `${itemDir}/route.json`;
+        const record = await this.db.getRoute(entry);
+        if (record) {
+          let liveMatchesDb = false;
+          try {
+            const liveContent = await this.fs.readAsStringAsync(livePath);
+            const liveParsed = JSON.parse(liveContent) as { name?: string };
+            if (liveParsed.name === record.name) {
+              liveMatchesDb = true;
+            }
+          } catch {
+            liveMatchesDb = false;
+          }
+
+          if (liveMatchesDb) {
+            // DB was already updated and live snapshot has matching name: delete backup
+            await this.fs.deleteAsync(bakPath, { idempotent: true });
+          } else {
+            // Interrupted before DB update or live snapshot corrupt: restore from backup
+            const bakContent = await this.fs.readAsStringAsync(bakPath);
+            await this.fs.writeAsStringAsync(livePath, bakContent);
+            await this.fs.deleteAsync(bakPath, { idempotent: true });
+          }
+        }
+      }
     }
-    await this.db.deleteRoute(id);
   }
 
   private async cleanStagingOrphans(): Promise<void> {
@@ -309,6 +546,62 @@ export class LocalRouteStorage {
       // Non-fatal if data orphan cleanup fails
     }
   }
+}
+
+export function validateRouteInstructions(doc: RouteDocument): { ready: boolean; reason?: string } {
+  if (!Array.isArray(doc.maneuvers) || doc.maneuvers.length === 0) {
+    return { ready: false, reason: "No turn maneuvers saved with route" };
+  }
+  if (!Array.isArray(doc.segments) || doc.segments.length === 0) {
+    return { ready: false, reason: "Route contains no geometry segments" };
+  }
+  for (let i = 0; i < doc.maneuvers.length; i++) {
+    const m = doc.maneuvers[i]!;
+    if (
+      typeof m !== "object" ||
+      m === null ||
+      typeof m.segmentIndex !== "number" ||
+      !Number.isInteger(m.segmentIndex) ||
+      m.segmentIndex < 0 ||
+      m.segmentIndex >= doc.segments.length
+    ) {
+      return { ready: false, reason: `Maneuver ${i} references invalid segmentIndex` };
+    }
+    const seg = doc.segments[m.segmentIndex]!;
+    if (
+      typeof m.shapeIndex !== "number" ||
+      !Number.isInteger(m.shapeIndex) ||
+      m.shapeIndex < 0 ||
+      m.shapeIndex >= seg.points.length
+    ) {
+      return { ready: false, reason: `Maneuver ${i} references invalid shapeIndex ${m.shapeIndex}` };
+    }
+    if (
+      typeof m.latitude !== "number" ||
+      !Number.isFinite(m.latitude) ||
+      typeof m.longitude !== "number" ||
+      !Number.isFinite(m.longitude)
+    ) {
+      return { ready: false, reason: `Maneuver ${i} has non-finite coordinates` };
+    }
+    const pt = seg.points[m.shapeIndex]!;
+    const latDiff = Math.abs(pt.latitude - m.latitude);
+    const lonDiff = Math.abs(pt.longitude - m.longitude);
+    // Sol review: Exact index coordinate match (< 1e-6)
+    if (latDiff > 1e-6 || lonDiff > 1e-6) {
+      return { ready: false, reason: `Maneuver ${i} coordinates do not match indexed geometry point` };
+    }
+    if (typeof m.instruction !== "string" || m.instruction.trim().length === 0) {
+      return { ready: false, reason: `Maneuver ${i} has empty instruction` };
+    }
+    if (
+      m.verbalInstruction !== undefined &&
+      (typeof m.verbalInstruction !== "string" || m.verbalInstruction.trim().length === 0)
+    ) {
+      return { ready: false, reason: `Maneuver ${i} has empty verbalInstruction` };
+    }
+  }
+  return { ready: true };
 }
 
 function isValidRouteDocument(value: unknown): value is RouteDocument {
@@ -356,153 +649,34 @@ function isValidRouteDocument(value: unknown): value is RouteDocument {
       ) {
         return false;
       }
-      if (
-        point.elevationMeters !== undefined &&
-        (typeof point.elevationMeters !== "number" || !Number.isFinite(point.elevationMeters))
-      ) {
-        return false;
-      }
-      if (point.time !== undefined && typeof point.time !== "string") {
-        return false;
-      }
       totalValidPoints++;
     }
     if (segment.points.length >= 2) {
-      const first = segment.points[0]!;
+      hasUsableSegment = true;
+    }
+  }
+
+  // Maneuvers validation: if maneuvers present, must be array of valid objects
+  if (doc.maneuvers !== undefined) {
+    if (!Array.isArray(doc.maneuvers)) return false;
+    for (const m of doc.maneuvers) {
+      if (typeof m !== "object" || m === null) return false;
+      const item = m as Record<string, unknown>;
       if (
-        segment.points.some(
-          (p) => p.latitude !== first.latitude || p.longitude !== first.longitude,
-        )
+        typeof item.instruction !== "string" ||
+        typeof item.latitude !== "number" ||
+        !Number.isFinite(item.latitude) ||
+        typeof item.longitude !== "number" ||
+        !Number.isFinite(item.longitude)
       ) {
-        hasUsableSegment = true;
+        return false;
       }
     }
   }
 
-  if (!hasUsableSegment || totalValidPoints === 0) return false;
-
-  if (!Array.isArray(doc.controlPoints)) return false;
-  for (const cp of doc.controlPoints) {
-    if (typeof cp !== "object" || cp === null) return false;
-    if (
-      typeof cp.id !== "string" ||
-      cp.id.trim() === "" ||
-      typeof cp.kind !== "string" ||
-      !["start", "finish", "via"].includes(cp.kind)
-    ) {
-      return false;
-    }
-    if (
-      typeof cp.latitude !== "number" ||
-      !Number.isFinite(cp.latitude) ||
-      cp.latitude < -90 ||
-      cp.latitude > 90
-    ) {
-      return false;
-    }
-    if (
-      typeof cp.longitude !== "number" ||
-      !Number.isFinite(cp.longitude) ||
-      cp.longitude < -180 ||
-      cp.longitude > 180
-    ) {
-      return false;
-    }
-  }
-
-  if (!Array.isArray(doc.waypoints)) return false;
-  for (const wp of doc.waypoints) {
-    if (typeof wp !== "object" || wp === null) return false;
-    if (typeof wp.id !== "string" || wp.id.trim() === "") return false;
-    if (
-      typeof wp.latitude !== "number" ||
-      !Number.isFinite(wp.latitude) ||
-      wp.latitude < -90 ||
-      wp.latitude > 90
-    ) {
-      return false;
-    }
-    if (
-      typeof wp.longitude !== "number" ||
-      !Number.isFinite(wp.longitude) ||
-      wp.longitude < -180 ||
-      wp.longitude > 180
-    ) {
-      return false;
-    }
-  }
-
-  if (!Array.isArray(doc.maneuvers)) return false;
-  for (const m of doc.maneuvers) {
-    if (typeof m !== "object" || m === null) return false;
-    if (typeof m.id !== "string" || m.id.trim() === "") return false;
-    if (
-      typeof m.latitude !== "number" ||
-      !Number.isFinite(m.latitude) ||
-      m.latitude < -90 ||
-      m.latitude > 90
-    ) {
-      return false;
-    }
-    if (
-      typeof m.longitude !== "number" ||
-      !Number.isFinite(m.longitude) ||
-      m.longitude < -180 ||
-      m.longitude > 180
-    ) {
-      return false;
-    }
-    if (
-      typeof m.segmentIndex !== "number" ||
-      !Number.isInteger(m.segmentIndex) ||
-      m.segmentIndex < 0 ||
-      m.segmentIndex >= doc.segments.length
-    ) {
-      return false;
-    }
-    if (
-      typeof m.shapeIndex !== "number" ||
-      !Number.isInteger(m.shapeIndex) ||
-      m.shapeIndex < 0 ||
-      m.shapeIndex >= (doc.segments[m.segmentIndex]?.points.length ?? 0)
-    ) {
-      return false;
-    }
-    if (typeof m.instruction !== "string" || m.instruction.trim() === "") {
-      return false;
-    }
-    if (m.verbalInstruction !== undefined && typeof m.verbalInstruction !== "string") {
-      return false;
-    }
-  }
-
-  if (doc.summary !== undefined) {
-    if (typeof doc.summary !== "object" || doc.summary === null) return false;
-    if (
-      typeof doc.summary.distanceMeters !== "number" ||
-      !Number.isFinite(doc.summary.distanceMeters) ||
-      doc.summary.distanceMeters < 0
-    ) {
-      return false;
-    }
-    if (
-      typeof doc.summary.durationSeconds !== "number" ||
-      !Number.isFinite(doc.summary.durationSeconds) ||
-      doc.summary.durationSeconds < 0
-    ) {
-      return false;
-    }
-  }
-
-  if (doc.routing !== undefined) {
-    if (typeof doc.routing !== "object" || doc.routing === null) return false;
-    if (typeof doc.routing.engine !== "string") return false;
-    if (!["road", "gravel", "mountain"].includes(doc.routing.profile)) return false;
-  }
-
-  return true;
+  return totalValidPoints >= 2 && hasUsableSegment;
 }
 
 function normalize(path: string): string {
-  return path.replace(/\/+$/u, "");
+  return path.replace(/\/+$/, "");
 }

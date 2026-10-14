@@ -1,6 +1,8 @@
 # Task004: mobile ride creation and three primary surfaces
 
-Status: READY FOR IMPLEMENTATION (2026-10-12).
+Status: ACCEPTED — Android emulator baseline (2026-10-14).
+Evidence: [Sol review and final run records](../reviews/004-sol-mobile-creation-review.md).
+Physical locked-screen GPS/audio, offline maps and navigation-engine replay remain separate gates.
 Owner: Sol; implementer: Gemini Pro. Baseline: accepted task003, `fd94b8f`.
 
 ## User decision and outcome

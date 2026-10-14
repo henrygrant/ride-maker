@@ -10,8 +10,10 @@ evidence in this repository.
 The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
 [Task 002: E2E foundation](tasks/002-mobile-test-foundation.md) is accepted.
 [Task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md) is accepted.
-Next is [task004: mobile creation and primary surfaces](tasks/004-mobile-ride-creation.md);
-prepared-ride contracts and the navigation engine follow; the existing [background spike](tasks/001-background-spike.md)
+[Task004: mobile creation and primary surfaces](tasks/004-mobile-ride-creation.md)
+is accepted for Android emulator creation and library management; evidence is recorded
+in [the review](reviews/004-sol-mobile-creation-review.md). Prepared-ride contracts
+and the navigation engine follow; the existing [background spike](tasks/001-background-spike.md)
 still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
@@ -44,8 +46,12 @@ navigating; report and recover interrupted sessions when it is reopened.
 - `apps/mobile` already uses Expo 57, React Native 0.86, MapLibre 11, foreground
   Expo Location, Expo Speech, and keep-awake. It can open shared route links and
   list public routes. It currently uses native React Native UI, not shared RSD.
-  It imports GPX files and preserves originals/snapshots in private storage with
-  SQLite metadata. Local imports reopen offline as previews. Turn preparation,
+  It creates bicycle routes through place search/map selection, previews and saves
+  them locally with full directions, and provides rename/confirmed deletion. It
+  imports GPX files and preserves originals/snapshots in private storage with
+  SQLite metadata. Created directions reopen offline; raw imports reopen as
+  previews. My rides prioritizes the local library, with shared/public access
+  secondary. Turn preparation,
   offline map downloads and background guidance remain pending.
   Its navigation helper and tests live in `apps/mobile/src/navigation.*`.
   Existing progress is clamped forward and ignores fix timestamps; replace those

@@ -7,6 +7,8 @@ appId: net.thg3.ridemaker.e2e
     id: "text-brand"
 
 # Open synthetic route
+- tapOn:
+    id: "button-toggle-secondary-links"
 - tapOn: "Synthetic Test Route"
 
 # Assert route view elements
@@ -48,6 +50,8 @@ appId: net.thg3.ridemaker.e2e
 # Stop navigation
 - tapOn:
     id: "button-navigation-toggle"
+- tapOn:
+    id: "button-end-ride-confirm"
 - assertVisible: "Start navigation"
 - assertNotVisible:
     id: "view-guidance"

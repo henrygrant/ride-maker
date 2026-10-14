@@ -12,35 +12,98 @@ export function computeSha256(data) {
 export function parseStorageObservationFromLogs(logContent, tag) {
   const lines = logContent.split("\n");
   const routes = [];
+  const chunkBuffers = new Map(); // key: routeIndex -> { total: number, chunks: Map<number, string> }
   let beginSeen = false;
   let endSeen = false;
   let expectedCount = -1;
 
   for (const line of lines) {
+    if (line.includes(`[E2E_STORAGE_OBSERVE_ERROR] tag="${tag}"`)) {
+      throw new Error(`Storage observation error logged for tag "${tag}": ${line}`);
+    }
     if (line.includes(`[E2E_STORAGE_OBSERVE_BEGIN] tag="${tag}"`)) {
       beginSeen = true;
       const m = line.match(/count=(\d+)/);
       if (m && m[1]) expectedCount = parseInt(m[1], 10);
       routes.length = 0;
+      chunkBuffers.clear();
     } else if (line.includes(`[E2E_STORAGE_OBSERVE_ROUTE]`)) {
       const markerIdx = line.indexOf(`[E2E_STORAGE_OBSERVE_ROUTE]`);
       const jsonStr = line.slice(markerIdx + `[E2E_STORAGE_OBSERVE_ROUTE]`.length).trim();
+      let item;
       try {
-        const item = JSON.parse(jsonStr);
-        if (!item.tag || item.tag === tag) {
-          const idx = typeof item.index === "number" ? item.index : routes.length;
-          routes[idx] = {
-            id: item.id,
-            name: item.name,
-            distanceMeters: item.distanceMeters,
-            pointCount: item.pointCount,
-            segmentCount: item.segmentCount,
-            snapshotGeometry: item.snapshotGeometry,
-            originalBase64: item.originalBase64,
-          };
+        item = JSON.parse(jsonStr);
+      } catch (err) {
+        throw new Error(`Failed to parse route log for tag "${tag}": ${err.message}`);
+      }
+      if (!item.tag || item.tag === tag) {
+        const idx = typeof item.index === "number" ? item.index : routes.length;
+        routes[idx] = {
+          id: item.id,
+          name: item.name,
+          distanceMeters: item.distanceMeters,
+          pointCount: item.pointCount,
+          segmentCount: item.segmentCount,
+          snapshotGeometry: item.snapshotGeometry,
+          originalBase64: item.originalBase64,
+          sourceKind: item.sourceKind,
+          hasInstructions: item.hasInstructions,
+          instructionReadiness: item.instructionReadiness,
+          controlPoints: item.controlPoints,
+          maneuvers: item.maneuvers,
+        };
+      }
+    } else if (line.includes(`[E2E_STORAGE_OBSERVE_CHUNK]`)) {
+      const tagMatch = line.match(/tag="([^"]+)"/);
+      const chunkTag = tagMatch ? tagMatch[1] : "";
+      if (chunkTag === tag) {
+        const rMatch = line.match(/routeIndex=(\d+)/);
+        const cMatch = line.match(/chunkIndex=(\d+)/);
+        const tMatch = line.match(/totalChunks=(\d+)/);
+        const dataIdx = line.indexOf("data=");
+        if (rMatch && cMatch && tMatch && dataIdx !== -1) {
+          const rIdx = parseInt(rMatch[1], 10);
+          const cIdx = parseInt(cMatch[1], 10);
+          const totalChunks = parseInt(tMatch[1], 10);
+          const chunkData = line.slice(dataIdx + 5);
+
+          if (!chunkBuffers.has(rIdx)) {
+            chunkBuffers.set(rIdx, { total: totalChunks, chunks: new Map() });
+          }
+          const buf = chunkBuffers.get(rIdx);
+          buf.chunks.set(cIdx, chunkData);
+
+          if (buf.chunks.size === buf.total) {
+            let fullStr = "";
+            for (let i = 0; i < buf.total; i++) {
+              const part = buf.chunks.get(i);
+              if (part === undefined) {
+                throw new Error(`Missing chunk ${i}/${buf.total} for routeIndex ${rIdx} in tag "${tag}"`);
+              }
+              fullStr += part;
+            }
+            try {
+              const item = JSON.parse(fullStr);
+              routes[rIdx] = {
+                id: item.id,
+                name: item.name,
+                distanceMeters: item.distanceMeters,
+                pointCount: item.pointCount,
+                segmentCount: item.segmentCount,
+                snapshotGeometry: item.snapshotGeometry,
+                originalBase64: item.originalBase64,
+                sourceKind: item.sourceKind,
+                hasInstructions: item.hasInstructions,
+                instructionReadiness: item.instructionReadiness,
+                controlPoints: item.controlPoints,
+                maneuvers: item.maneuvers,
+              };
+              chunkBuffers.delete(rIdx);
+            } catch (err) {
+              throw new Error(`Failed to parse assembled chunked route JSON for routeIndex ${rIdx}: ${err.message}`);
+            }
+          }
         }
-      } catch {
-        // ignore malformed log fragment
       }
     } else if (line.includes(`[E2E_STORAGE_OBSERVE_END] tag="${tag}"`)) {
       if (beginSeen) {
@@ -48,6 +111,11 @@ export function parseStorageObservationFromLogs(logContent, tag) {
         break;
       }
     }
+  }
+
+  if (chunkBuffers.size > 0) {
+    const pendingIndices = Array.from(chunkBuffers.keys()).join(", ");
+    throw new Error(`Incomplete chunked route observations for route indices [${pendingIndices}] in tag "${tag}"`);
   }
 
   const cleanRoutes = routes.filter((r) => Boolean(r && r.id));
@@ -89,14 +157,14 @@ export function loadFixtures(fixturesDir) {
   return fixtures;
 }
 
-export function verifyPersistenceObservations(before, after, expectedFixtures) {
+export function verifyPersistenceObservations(before, after, expectedFixtures, options = {}) {
   if (!before || !before.routes || before.routes.length === 0) {
     throw new Error("Empty evidence: 'before' observation contains zero saved routes.");
   }
   if (!after || !after.routes || after.routes.length === 0) {
     throw new Error("Empty evidence: 'after' observation contains zero saved routes.");
   }
-  if (before.routes.length < 2) {
+  if (before.routes.length < (options.expectCreated ? 1 : 2)) {
     throw new Error(`Insufficient evidence: expected at least 2 saved routes, got ${before.routes.length}.`);
   }
   if (before.routes.length !== after.routes.length) {
@@ -105,6 +173,7 @@ export function verifyPersistenceObservations(before, after, expectedFixtures) {
     );
   }
 
+  let createdRoutesCount = 0;
   for (let i = 0; i < before.routes.length; i++) {
     const b = before.routes[i];
     const a = after.routes[i];
@@ -126,6 +195,28 @@ export function verifyPersistenceObservations(before, after, expectedFixtures) {
 
     if (JSON.stringify(b.snapshotGeometry) !== JSON.stringify(a.snapshotGeometry)) {
       throw new Error(`Snapshot geometry mismatch for route '${b.id}'.`);
+    }
+
+    for (const field of ["sourceKind", "hasInstructions", "instructionReadiness", "controlPoints", "maneuvers"]) {
+      if (JSON.stringify(b[field]) !== JSON.stringify(a[field])) {
+        throw new Error(`Stored ${field} mismatch for route '${b.id}'.`);
+      }
+    }
+    if (b.sourceKind === "created") {
+      createdRoutesCount++;
+      if (b.hasInstructions !== true || b.instructionReadiness !== true ||
+          !Array.isArray(b.controlPoints) || b.controlPoints.length < 2 ||
+          !Array.isArray(b.maneuvers) || b.maneuvers.length === 0) {
+        throw new Error(`Missing created directions evidence for route '${b.id}'.`);
+      }
+      for (const maneuver of b.maneuvers) {
+        const point = b.snapshotGeometry?.[maneuver.segmentIndex]?.[maneuver.shapeIndex];
+        if (!point || !Number.isFinite(maneuver.latitude) || !Number.isFinite(maneuver.longitude) ||
+            Math.abs(point[0] - maneuver.latitude) > 1e-6 || Math.abs(point[1] - maneuver.longitude) > 1e-6 ||
+            typeof maneuver.instruction !== "string" || !maneuver.instruction.trim()) {
+          throw new Error(`Invalid created maneuver evidence for route '${b.id}'.`);
+        }
+      }
     }
 
     if (!b.originalBase64 || !a.originalBase64) {
@@ -152,6 +243,7 @@ export function verifyPersistenceObservations(before, after, expectedFixtures) {
   const storedGpxHashes = [];
 
   for (const route of before.routes) {
+    if (options.expectCreated && route.sourceKind === "created") continue;
     const routeBytes = Buffer.from(route.originalBase64, "base64");
     const routeSha = computeSha256(routeBytes);
 
@@ -171,13 +263,18 @@ export function verifyPersistenceObservations(before, after, expectedFixtures) {
   }
 
   const bomFixture = expectedFixtures.find((f) => f.name.includes("bom"));
-  if (bomFixture && !matchedFixtures.has(bomFixture.name)) {
+  if (!options.expectCreated && bomFixture && !matchedFixtures.has(bomFixture.name)) {
     throw new Error(
       `Missing expected UTF-8 BOM fixture '${bomFixture.name}' in observed routes.`,
     );
   }
 
+  if (options.expectCreated && createdRoutesCount === 0) {
+    throw new Error("Missing expected created route evidence.");
+  }
+
   return {
+    createdRoutesCount,
     verifiedAt: new Date().toISOString(),
     status: "passed",
     routesCount: before.routes.length,
@@ -187,7 +284,9 @@ export function verifyPersistenceObservations(before, after, expectedFixtures) {
     matchingGeometry: true,
     matchingOriginalBytes: true,
     matchingOrder: true,
-    fixtureHashesVerified: true,
+    fixtureHashesVerified: matchedFixtures.size > 0,
+    matchingManeuvers: true,
+    matchingControlPoints: true,
     offlinePreserved: true,
   };
 }
@@ -199,12 +298,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   let afterFile = "";
   let fixturesDir = path.resolve("apps/mobile/e2e/fixtures");
   let outputFile = "";
+  let expectCreated = false;
 
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--before" && args[i + 1]) beforeFile = args[++i];
     else if (args[i] === "--after" && args[i + 1]) afterFile = args[++i];
     else if (args[i] === "--fixtures-dir" && args[i + 1]) fixturesDir = args[++i];
     else if (args[i] === "--output" && args[i + 1]) outputFile = args[++i];
+    else if (args[i] === "--expect-created") expectCreated = true;
   }
 
   if (!beforeFile || !afterFile) {
@@ -216,11 +317,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const beforeLog = fs.readFileSync(beforeFile, "utf8");
     const afterLog = fs.readFileSync(afterFile, "utf8");
 
-    const beforeObs = parseStorageObservationFromLogs(beforeLog, "before");
-    const afterObs = parseStorageObservationFromLogs(afterLog, "after");
+    const beforeObs = parseStorageObservationFromLogs(beforeLog, expectCreated ? "created-before" : "before");
+    const afterObs = parseStorageObservationFromLogs(afterLog, expectCreated ? "created-after" : "after");
 
     const fixtures = loadFixtures(fixturesDir);
-    const result = verifyPersistenceObservations(beforeObs, afterObs, fixtures);
+    const result = verifyPersistenceObservations(beforeObs, afterObs, fixtures, { expectCreated });
 
     console.log(`Persistence verified: ${result.routesCount} routes matched before/after restart.`);
     for (const h of result.storedGpxHashes) {

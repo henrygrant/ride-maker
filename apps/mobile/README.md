@@ -23,7 +23,7 @@ emulator harness, synthetic fixtures, standalone checks, and baseline verificati
 
 ### Automated End-to-End Tests (Maestro on Android Emulator)
 
-The mobile E2E test suite executes nine automated flows against a dedicated Android emulator (`emulator-5554`):
+The mobile E2E test suite executes fourteen automated journeys against a dedicated Android emulator (`emulator-5554`):
 1. **01 Startup & Diagnostics**: App launch, brand title verification, diagnostics entry/exit.
 2. **02 Invalid Route**: Invalid route ID entry, error banner assertion, tap dismissal.
 3. **03 Saved Route Navigation**: Synthetic route load, distance & map assertions, foreground navigation start/stop, voice mute toggle.
@@ -33,14 +33,22 @@ The mobile E2E test suite executes nine automated flows against a dedicated Andr
 7. **06 GPX Import & Preview**: Import track, route, and segmented GPX files via Android DocumentPicker, assert truthful distance/name/guidance notice, wait for fully rendered native map.
 8. **07 GPX Persistence & Offline**: Self-contained flow verifying disk persistence across cold process restarts and device-wide network cut (airplane mode, disabled wifi/data, removed reverse mapping, verified by emulator probes).
 9. **08 GPX Import Errors & Cancellation**: Verifies existing healthy routes survive document picker cancellation, malformed XML errors, and >10 MiB limit rejections.
+10. **09a Creation Permission Denied**: Denial keeps manual search available and blocks incomplete previews.
+11. **09 Creation & Preview**: Explicit map placement, search recovery, optional stop, loop, point-edit invalidation and local save.
+12. **09b Created Offline Navigation**: Runner-owned network cut and cold restart, stored instructions and geometry, unchanged imported originals.
+13. **10 Created Ride Navigation**: Native GPS turn/progress, off-route, arrival, cancelled End/Back continuity and confirmed provider teardown.
+14. **11 Library Management**: Fourteen long-name synthetic rides, scrolling, rename/restart, cancel/confirm deletion and storage preservation. The runner captures package-targeted observations between rename and the 11b deletion subflow.
 
 To run the automated suite:
 ```bash
-# Run all nine E2E flows
+# Run the full E2E suite
 ./scripts/mobile-e2e/run.sh --serial emulator-5554
 
 # Rebuild standalone APK before testing
 ./scripts/mobile-e2e/run.sh --serial emulator-5554 --build-apk
+
+# Focused diagnostics (not full-suite acceptance; 10/11 require a saved ride from 09)
+./scripts/mobile-e2e/run.sh --serial emulator-5554 --flow 09-create-ride-and-preview
 
 # Run intentional failure demonstration
 ./scripts/mobile-e2e/run.sh --serial emulator-5554 --demo-failure
@@ -80,8 +88,8 @@ cd apps/mobile && npx expo start --dev-client
 - **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
-  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`: 15 test files, 82 tests).
-  - All monorepo unit tests pass (`npm test`: 100 total unit tests across 17 test files in 8 packages).
+  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`: 20 test files, 134 tests).
+  - All monorepo unit tests pass (`npm test`: all configured test workspaces).
   - Android native manifest includes required background permissions (`RECEIVE_BOOT_COMPLETED`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, and `POST_NOTIFICATIONS`).
   - Metro Android bundle export compiles cleanly to Hermes bytecode with module-scope background task registration.
 

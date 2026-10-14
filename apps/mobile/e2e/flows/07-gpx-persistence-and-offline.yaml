@@ -17,7 +17,7 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "2.1 km"
 - assertVisible:
     id: "text-guidance-notice"
-- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible: "Turn-by-turn guidance is not available for raw GPX imports."
 - assertVisible:
     id: "view-map"
 - assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
@@ -45,7 +45,7 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "2.3 km"
 - assertVisible:
     id: "text-guidance-notice"
-- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible: "Turn-by-turn guidance is not available for raw GPX imports."
 - assertVisible:
     id: "view-map"
 - assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
@@ -73,7 +73,7 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "1.0 km"
 - assertVisible:
     id: "text-guidance-notice"
-- assertVisible: "Route saved. Turn-by-turn guidance is coming next."
+- assertVisible: "Turn-by-turn guidance is not available for raw GPX imports."
 - assertVisible:
     id: "view-map"
 - assertVisible: "Saved route data is offline · foreground guidance only · maps require network"
