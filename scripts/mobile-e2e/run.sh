@@ -88,7 +88,7 @@ done
 
 if [[ -n "$SELECTED_FLOW" ]]; then
   case "$SELECTED_FLOW" in
-    01-startup-and-diagnostics|02-invalid-route|03-saved-route-navigation|04a-diagnostics-permission-denied|04-diagnostics-lifecycle|05-simulated-ride|06-gpx-import-and-preview|07-gpx-persistence-and-offline|08-gpx-import-errors-and-cancel|09a-create-permission-denied|09-create-ride-and-preview|10-created-ride-navigation|11-library-management) ;;
+    01-startup-and-diagnostics|02-invalid-route|03-saved-route-navigation|04a-diagnostics-permission-denied|04-diagnostics-lifecycle|05-simulated-ride|06-gpx-import-and-preview|07-gpx-persistence-and-offline|08-gpx-import-errors-and-cancel|09a-create-permission-denied|09-create-ride-and-preview|10-created-ride-navigation|11-library-management|12-map-home-and-sheet) ;;
     *) echo "ERROR: Unknown focused flow '$SELECTED_FLOW'." >&2; exit 1 ;;
   esac
   if [[ "$VERIFY_CONSUMER" == "true" || "$RUN_FAILURE_DEMO" == "true" || "$RUN_GPS_FAILURE_DEMO" == "true" || "$RUN_INEFFECTIVE_CUT_DEMO" == "true" ]]; then
@@ -1193,6 +1193,14 @@ run_flow() {
         fi
       done
       ;;
+    12-map-home-and-sheet)
+      for exp in 12-map-home-initial.png 12-my-rides-drawer-open.png 12-selected-ride-dock.png 12-returned-to-map-home.png; do
+        if [[ ! -s "$ARTIFACTS_DIR/screenshots/$exp" ]]; then
+          echo "ERROR: Expected checkpoint screenshot '$exp' missing!" >&2
+          missing_checkpoint=true
+        fi
+      done
+      ;;
   esac
 
   if [[ $flow_status -eq 0 ]] && [[ "$feeder_failed" == "false" ]] && [[ "$missing_checkpoint" == "false" ]]; then
@@ -1232,6 +1240,7 @@ else
     "$FLOWS_DIR/09-create-ride-and-preview.yaml"
     "$FLOWS_DIR/10-created-ride-navigation.yaml"
     "$FLOWS_DIR/11-library-management.yaml"
+    "$FLOWS_DIR/12-map-home-and-sheet.yaml"
   )
 
   for flow in "${FLOWS[@]}"; do

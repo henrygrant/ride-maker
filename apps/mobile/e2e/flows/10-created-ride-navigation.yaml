@@ -7,6 +7,8 @@ appId: net.thg3.ridemaker.e2e
     id: "text-brand"
 
 # 1. Open the created ride from library
+- tapOn:
+    id: "home-open-myrides"
 - tapOn: "Morning River Loop"
 - assertVisible:
     id: "text-route-title"
@@ -98,4 +100,8 @@ appId: net.thg3.ridemaker.e2e
     id: "button-back"
 - assertVisible:
     id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Morning River Loop"
+- tapOn:
+    id: "button-close-my-rides"

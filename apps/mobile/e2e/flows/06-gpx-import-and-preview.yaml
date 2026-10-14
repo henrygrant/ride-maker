@@ -68,7 +68,11 @@ appId: net.thg3.ridemaker.e2e
     id: "button-back"
 - assertVisible:
     id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Central Park Track"
+- tapOn:
+    id: "button-close-my-rides"
 
 # 2. Import normal route GPX fixture
 - tapOn:
@@ -132,7 +136,11 @@ appId: net.thg3.ridemaker.e2e
     id: "button-back"
 - assertVisible:
     id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Hudson Greenway Route"
+- tapOn:
+    id: "button-close-my-rides"
 
 # 3. Import segmented GPX fixture (verifying gap exclusion in distance)
 - tapOn:
@@ -193,4 +201,8 @@ appId: net.thg3.ridemaker.e2e
     id: "button-back"
 - assertVisible:
     id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Segmented Shoreline"
+- tapOn:
+    id: "button-close-my-rides"

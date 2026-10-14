@@ -54,8 +54,16 @@ The [background navigation spike](docs/tasks/001-background-spike.md) awaits fie
 checks. [Task 004](docs/tasks/004-mobile-ride-creation.md) and its
 [review record](docs/reviews/004-sol-mobile-creation-review.md) track the accepted historical
 mobile creation baseline. [Task 005](docs/tasks/005-mobile-creation-redesign.md) defines the
-accepted Concept A Floating Dock redesign and its expanded 14-flow native
-acceptance suite.
+accepted Concept A Floating Dock redesign. [Task 006](docs/tasks/006-map-home-and-library-sheet.md)
+defines the user-approved "One Map, Three Surfaces" architecture (Map Home, My Rides Drawer,
+and Selected Ride Dock).
+
+Per user agreement, testing follows a selective testing policy: prioritize targeted
+smoke and focused journey validation to catch genuine product and UI issues while halting
+repeated full-suite or stale-state infrastructure loops. Historical 004/005 full-suite passes
+remain valid baselines for their respective architectures, but do not imply or require
+immediate 006 full regression runs on focused handoffs. Completed concrete actions are
+reported directly without future completion promises.
 
 ## Commands
 

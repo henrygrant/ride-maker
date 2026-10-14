@@ -6,7 +6,9 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible:
     id: "text-brand"
 
-# Open synthetic route
+# Open My rides drawer and select synthetic route
+- tapOn:
+    id: "home-open-myrides"
 - tapOn:
     id: "button-toggle-secondary-links"
 - tapOn: "Synthetic Test Route"
@@ -52,7 +54,8 @@ appId: net.thg3.ridemaker.e2e
     id: "button-navigation-toggle"
 - tapOn:
     id: "button-end-ride-confirm"
-- assertVisible: "Start navigation"
+- assertVisible:
+    id: "button-navigation-toggle"
 - assertNotVisible:
     id: "view-guidance"
 

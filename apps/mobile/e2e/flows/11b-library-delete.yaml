@@ -1,7 +1,24 @@
 appId: net.thg3.ridemaker.e2e
 ---
+# If on Map Home, open My rides
+- runFlow:
+    when:
+      visible:
+        id: "home-open-myrides"
+    commands:
+      - tapOn:
+          id: "home-open-myrides"
+
 # 5. Test Delete Cancellation and Confirmation
+- scrollUntilVisible:
+    element: "Morning River Sunset Loop"
+    direction: DOWN
+    timeout: 15000
 - tapOn: "Morning River Sunset Loop"
+- assertVisible:
+    id: "button-ride-options"
+- tapOn:
+    id: "button-ride-options"
 - assertVisible:
     id: "button-delete-ride"
 - tapOn:
@@ -21,16 +38,20 @@ appId: net.thg3.ridemaker.e2e
 
 # Confirm delete
 - tapOn:
+    id: "button-ride-options"
+- tapOn:
     id: "button-delete-ride"
 - tapOn:
     id: "button-delete-confirm"
 
-# Verify ride is deleted and removed from library
+# Verify ride is deleted and returns to map home
 - assertVisible:
     id: "text-brand"
-- assertNotVisible: "Morning River Sunset Loop"
 
-# Verify remaining records are intact and accessible
+# Verify remaining records are intact and accessible inside drawer
+- tapOn:
+    id: "home-open-myrides"
+- assertNotVisible: "Morning River Sunset Loop"
 - scrollUntilVisible:
     element: "Pacific Coast Highway Scenic Vista Route from San Francisco to Santa Cruz with Ocean Overlooks and Headwinds"
     direction: UP

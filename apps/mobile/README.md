@@ -32,8 +32,7 @@ The mobile E2E test suite executes fourteen automated journeys against a dedicat
 6. **05 Simulated Ride**: Real-time native GPS waypoint feeding via `feed-gps.sh`, driving Expo's location adapter through turn maneuvers, off-route detection (>50m), arrival, and navigation teardown.
 7. **06 GPX Import & Preview**: Import track, route, and segmented GPX files via Android DocumentPicker, assert truthful distance/name/guidance notice, wait for fully rendered native map.
 8. **07 GPX Persistence & Offline**: Self-contained flow verifying disk persistence across cold process restarts and device-wide network cut (airplane mode, disabled wifi/data, removed reverse mapping, verified by emulator probes).
-9. **08 GPX Import Errors & Cancellation**: Verifies existing healthy routes survive document picker cancellation, malformed XML errors, and >10 MiB limit rejections.
-10. **09a Creation Permission Denied**: Denial keeps manual search available and blocks incomplete previews.
+9. **08 GPX Import Errors & Cancellation**: Verifies existing healthy routes survive document picker cancellation, malformed XML errors, and >10 MiB limit rejections.\n10. **09a Creation Permission Denied**: Denial keeps manual search available and blocks incomplete previews.
 11. **09 Creation & Preview**: Concept A Floating Dock creation on full-bleed map, candidate map placement, geocoding search with error recovery, staged loop top search with cancellation vs commit, multi-stop management (up to 8 stops, 3+ long named stops, reorder up/down, remove, undo), Locate route preservation, blank name save recovery, and local save.
 12. **09b Created Offline Navigation**: Runner-owned network cut and cold restart, stored instructions and geometry, unchanged imported originals.
 13. **10 Created Ride Navigation**: Native GPS turn/progress, off-route, arrival, cancelled End/Back continuity and confirmed provider teardown.
@@ -45,6 +44,10 @@ The mobile E2E test suite executes fourteen automated journeys against a dedicat
 - **Final Consumer APK**: `4d5d6b4be498ec20d6e9c478e7f23e4ce898e06762bee575aa84128f65bd9045` (122,767,776 bytes, `net.thg3.ridemaker`, cleartext: `false`). Installed `-r` preserving existing consumer route data; left foreground visible.
 - **Final normalized creation/offline restart run**: `run-20261014-142822-focused-09-create-ride-and-preview` (2/2 passed). Source checkout normalization and non-destructive consumer verification are documented in [Sol’s review](../../docs/reviews/005-sol-floating-dock-review.md).
 - **Unit Tests**: 21 test files, 145 tests passing.
+
+### Selective Testing Policy (User Agreement)
+
+Per user agreement, mobile verification adheres to a selective testing policy: prioritize discovering real product and UI defects through targeted, focused flows (such as `12-map-home-and-sheet` smoke and non-destructive `consumer-standalone` verification) while stopping stale-state infrastructure test loops. Historical 004/005 full passes demonstrate baseline validity for those stages, but do not imply or require immediate 006 full regression runs on focused handoffs. Completed concrete actions are recorded directly without future completion promises.
 
 To run the automated suite:
 ```bash
@@ -95,7 +98,7 @@ cd apps/mobile && npx expo start --dev-client
 - **EAS setup (2026-10-11)**: Authenticated on nauvis as `henrygrant`; linked to `@henrygrant/ride-maker` (project ID `b282abf3-3446-4e8b-a97f-bfd583a2e43c`). Android signing credentials are managed remotely by EAS. Account sessions and keys are not stored in Git.
 - **Verification Completed Locally**:
   - Monorepo and workspace TypeScript checks pass (`npm run check`).
-  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`: 21 test files, 145 tests passing).
+  - All mobile workspace unit and lifecycle regression tests pass (`npm test --workspace @ride-maker/mobile`: 22 test files, 147 tests passing).
   - All monorepo unit tests pass (`npm test`: all configured test workspaces).
   - Android native manifest includes required background permissions (`RECEIVE_BOOT_COMPLETED`, `ACCESS_BACKGROUND_LOCATION`, `ACCESS_COARSE_LOCATION`, `ACCESS_FINE_LOCATION`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_LOCATION`, and `POST_NOTIFICATIONS`).
   - Metro Android bundle export compiles cleanly to Hermes bytecode with module-scope background task registration.

@@ -6,7 +6,9 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible:
     id: "text-brand"
 
-# Reveal secondary shared route link input
+# Open My rides drawer and reveal secondary shared route link input
+- tapOn:
+    id: "home-open-myrides"
 - tapOn:
     id: "button-toggle-secondary-links"
 

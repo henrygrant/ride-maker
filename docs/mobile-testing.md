@@ -93,7 +93,7 @@ The active creation flow has been overhauled under Task 005 to Concept A Floatin
   - Run `run-20261014-120225` was round 1, rejected due to Save naming assertion failure (confirmed by parent Sol via SSH review), not round 2 error banner dismissal.
   - Fabricated or unrecorded round 1 run IDs are explicitly rejected.
 - **Fixture Pan & Placement Observation**:
-  - Numeric pan coordinates are not asserted by automated trace (Flow 09 executes a map swipe gesture followed by tapping `button-cancel-map-placement`, verifying that cancellation discards candidate placement and preserves unconfirmed start state `"Where are we starting?"` without mutating the itinerary).
+  - Numeric pan coordinates are not asserted by automated trace (Flow 09 executes a map swipe gesture followed by tapping `button-cancel-map-placement`, verifying that cancellation discards candidate placement and preserves unconfirmed start state `\"Where are we starting?\"` without mutating the itinerary).
   - Map placement coordinate assignment is verified through confirmed placement actions (e.g. Finish location selected on map and committed to route data with live Valhalla snapped geometry).
 - **Consumer Isolation & Live Route Persistence Evidence**:
   - Consumer APK: SHA-256 `c266b97b5e70b3395e76313684821c429b1cb23b16f8389999f8f8184202ddbf` (122,767,776 bytes, `net.thg3.ridemaker`, cleartext `false`).
@@ -117,6 +117,15 @@ manifest and screenshot verify ordinary controls, no test badge/diagnostics,
 and preservation of the existing local ride. The app remains on the visible
 emulator. See [Sol's review](reviews/005-sol-floating-dock-review.md) for acceptance
 scope and limitations.
+
+### Task 006: focused Android UI acceptance and selective testing
+
+Under Task 006 ("One Map, Three Surfaces"), testing follows a **selective testing policy** agreed upon with the user:
+- Prioritize targeted smoke and focused journey validation to catch genuine product, layout, and UI issues.
+- Stop repetitive full-suite regression runs and stale-state infrastructure loops during focused UI handoffs.
+- Historical full passes for Task 004 (14/14) and Task 005 (14/14, `run-20261014-135922`) stand as accepted historical baselines for their respective architectures, but do not imply or require an immediate 006 full regression suite run.
+- UI changes use typechecks, focused interaction checks and a normal-app visual review. Routing, storage, GPS and lifecycle changes receive deeper checks of affected behavior. Full regression runs are reserved for releases or broad changes; repeat only when changes or unresolved failures justify it.
+- Task006 focused UI acceptance is recorded in [Sol’s review](reviews/006-sol-map-home-review.md). Its full updated regression suite has not passed as a whole. Earlier suite passes remain historical evidence for their original implementations.
 
 ## Test layers and what they prove
 

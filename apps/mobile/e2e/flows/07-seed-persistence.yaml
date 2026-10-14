@@ -47,7 +47,13 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "Central Park Track"
 - tapOn:
     id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Central Park Track"
+- tapOn:
+    id: "button-close-my-rides"
 
 # Seed route 2: synthetic-route.gpx
 - tapOn:
@@ -90,8 +96,14 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "Hudson Greenway Route"
 - tapOn:
     id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Central Park Track"
 - assertVisible: "Hudson Greenway Route"
+- tapOn:
+    id: "button-close-my-rides"
 
 # Seed route 3: synthetic-utf8-bom.gpx (real picker BOM / non-ASCII fixture)
 - tapOn:
@@ -134,6 +146,12 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible: "München Über Berg Straße — Café René"
 - tapOn:
     id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Central Park Track"
 - assertVisible: "Hudson Greenway Route"
 - assertVisible: "München Über Berg Straße — Café René"
+- tapOn:
+    id: "button-close-my-rides"

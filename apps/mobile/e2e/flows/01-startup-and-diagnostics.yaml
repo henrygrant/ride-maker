@@ -9,6 +9,10 @@ appId: net.thg3.ridemaker.e2e
     id: "badge-test-mode"
 - takeScreenshot: 01-main-screen
 - tapOn:
+    id: "home-open-myrides"
+- tapOn:
+    id: "button-toggle-secondary-links"
+- tapOn:
     id: "button-diagnostics-toggle"
 - assertVisible:
     id: "text-diagnostics-title"

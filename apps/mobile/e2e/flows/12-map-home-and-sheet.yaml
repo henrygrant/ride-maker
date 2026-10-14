@@ -1,0 +1,126 @@
+appId: net.thg3.ridemaker.e2e
+---
+# 1. Startup on Map Home
+- launchApp:
+    stopApp: true
+    clearState: false
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "badge-test-mode"
+- assertVisible:
+    id: "home-open-myrides"
+- assertVisible:
+    id: "button-create-ride"
+- assertVisible:
+    id: "button-import-gpx"
+- assertVisible:
+    id: "button-locate-me"
+- extendedWaitUntil:
+    visible:
+      id: "test-map-rendered"
+    timeout: 30000
+- takeScreenshot: 12-map-home-initial
+
+# 2. Test Locate Me camera centering (leaves home dock intact)
+- tapOn:
+    id: "button-locate-me"
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "button-create-ride"
+
+# 3. Open My rides drawer
+- tapOn:
+    id: "home-open-myrides"
+- assertVisible:
+    id: "text-library-title"
+- assertVisible:
+    id: "button-close-my-rides"
+- takeScreenshot: 12-my-rides-drawer-open
+
+# 4. Dismiss drawer via close button (returns to Map Home)
+- tapOn:
+    id: "button-close-my-rides"
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "button-create-ride"
+
+# 5. Re-open drawer and select Morning River Loop
+- tapOn:
+    id: "home-open-myrides"
+- assertVisible: "Morning River Loop"
+- tapOn: "Morning River Loop"
+
+# 6. Verify Selected Ride Dock over mounted map
+- extendedWaitUntil:
+    visible:
+      id: "text-route-title"
+    timeout: 10000
+- assertVisible: "Morning River Loop"
+- assertVisible:
+    id: "text-route-distance"
+- assertVisible:
+    id: "button-navigation-toggle"
+- assertVisible:
+    id: "button-open-my-rides"
+- assertVisible:
+    id: "button-back"
+- assertVisible:
+    id: "button-ride-options"
+- takeScreenshot: 12-selected-ride-dock
+
+# 7. Test Options Menu dismiss hierarchy via Back button
+- tapOn:
+    id: "button-ride-options"
+- assertVisible:
+    id: "button-rename-ride"
+- assertVisible:
+    id: "button-delete-ride"
+- back
+- assertVisible:
+    id: "text-route-title"
+- assertNotVisible:
+    id: "button-rename-ride"
+
+# 8. Test Rename Modal open and cancel
+- tapOn:
+    id: "button-ride-options"
+- tapOn:
+    id: "button-rename-ride"
+- assertVisible:
+    id: "input-rename-ride-name"
+- assertVisible:
+    id: "button-rename-cancel"
+- assertVisible:
+    id: "button-rename-confirm"
+- tapOn:
+    id: "button-rename-cancel"
+- assertVisible:
+    id: "text-route-title"
+
+# 9. Test Delete Confirmation Modal open and cancel
+- tapOn:
+    id: "button-ride-options"
+- tapOn:
+    id: "button-delete-ride"
+- assertVisible:
+    id: "text-delete-confirm-message"
+- assertVisible:
+    id: "button-delete-cancel"
+- assertVisible:
+    id: "button-delete-confirm"
+- tapOn:
+    id: "button-delete-cancel"
+- assertVisible:
+    id: "text-route-title"
+
+# 10. Tap Back button to clear selection and return to Map Home
+- tapOn:
+    id: "button-back"
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "button-create-ride"
+- takeScreenshot: 12-returned-to-map-home

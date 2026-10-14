@@ -1,7 +1,7 @@
 appId: net.thg3.ridemaker
 ---
 - launchApp:
-    clearState: true
+    clearState: false
 - extendedWaitUntil:
     visible:
       id: "text-brand"
@@ -12,6 +12,14 @@ appId: net.thg3.ridemaker
     id: "button-import-gpx"
 - assertNotVisible:
     id: "button-test-seed-library"
+- assertNotVisible:
+    id: "badge-test-mode"
+- assertNotVisible:
+    id: "button-diagnostics-toggle"
+- tapOn:
+    id: "home-open-myrides"
+- assertVisible:
+    id: "text-library-title"
 - tapOn:
     id: "button-toggle-secondary-links"
 - assertVisible:
@@ -19,7 +27,12 @@ appId: net.thg3.ridemaker
 - assertVisible:
     id: "button-view-route"
 - assertNotVisible:
-    id: "badge-test-mode"
-- assertNotVisible:
-    id: "button-diagnostics-toggle"
+    id: "button-test-seed-library"
 - takeScreenshot: consumer-standalone-main
+- tapOn:
+    id: "button-close-my-rides"
+- assertVisible:
+    id: "text-brand"
+- assertVisible:
+    id: "button-create-ride"
+- takeScreenshot: consumer-foreground

@@ -6,7 +6,9 @@ appId: net.thg3.ridemaker.e2e
 - assertVisible:
     id: "text-brand"
 
-# Open synthetic route
+# Open My rides drawer and select synthetic route
+- tapOn:
+    id: "home-open-myrides"
 - tapOn:
     id: "button-toggle-secondary-links"
 - tapOn: "Synthetic Test Route"

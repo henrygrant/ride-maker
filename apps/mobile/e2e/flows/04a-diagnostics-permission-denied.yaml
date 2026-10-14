@@ -5,6 +5,10 @@ appId: net.thg3.ridemaker.e2e
     permissions:
       all: deny
 
+- tapOn:
+    id: "home-open-myrides"
+- tapOn:
+    id: "button-toggle-secondary-links"
 - assertVisible:
     id: "button-diagnostics-toggle"
 - tapOn:

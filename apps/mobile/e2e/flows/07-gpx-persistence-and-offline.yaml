@@ -7,6 +7,8 @@ appId: net.thg3.ridemaker.e2e
     id: "text-brand"
 
 # 1. Reopen first saved route from app-private storage (with picker files removed and offline)
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Central Park Track"
 - tapOn: "Central Park Track"
 - assertVisible:
@@ -35,6 +37,8 @@ appId: net.thg3.ridemaker.e2e
     id: "text-brand"
 
 # 2. Reopen second saved route from app-private storage
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Hudson Greenway Route"
 - tapOn: "Hudson Greenway Route"
 - assertVisible:
@@ -63,6 +67,8 @@ appId: net.thg3.ridemaker.e2e
     id: "text-brand"
 
 # 3. Reopen third saved route (UTF-8 BOM and non-ASCII München Über Berg Straße — Café René)
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "München Über Berg Straße — Café René"
 - tapOn: "München Über Berg Straße — Café René"
 - assertVisible:

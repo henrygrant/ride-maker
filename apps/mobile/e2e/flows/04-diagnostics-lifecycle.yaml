@@ -4,6 +4,10 @@ appId: net.thg3.ridemaker.e2e
     stopApp: false
     clearState: false
 
+- tapOn:
+    id: "home-open-myrides"
+- tapOn:
+    id: "button-toggle-secondary-links"
 - assertVisible:
     id: "button-diagnostics-toggle"
 - tapOn:
@@ -76,3 +80,5 @@ appId: net.thg3.ridemaker.e2e
 
 - tapOn:
     id: "button-diagnostics-toggle"
+- assertVisible:
+    id: "text-brand"

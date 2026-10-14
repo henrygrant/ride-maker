@@ -398,4 +398,8 @@ appId: net.thg3.ridemaker.e2e
     id: "button-back"
 - assertVisible:
     id: "text-brand"
+- tapOn:
+    id: "home-open-myrides"
 - assertVisible: "Morning River Loop"
+- tapOn:
+    id: "button-close-my-rides"
