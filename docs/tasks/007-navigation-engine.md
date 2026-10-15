@@ -1,9 +1,10 @@
 # Task007: prepared-ride boundary and deterministic navigation engine
 
-Status: implementation checkpoint, not accepted; Gemini quota interrupted the
-handoff. Sol's fresh package run passed 30 tests, but app integration and full
-contract review remain pending. See [initial review](../reviews/007-009-sol-initial-review.md).
-Sol defines this contract; Gemini implements;
+Status: pure engine accepted by Sol after independent review and a fresh 43-test
+pass. Mobile integration and field acceptance remain pending. See
+[acceptance evidence](../reviews/007-sol-engine-acceptance.md).
+See [initial review](../reviews/007-009-sol-initial-review.md).
+Sol defines this contract; Gemini began implementation and Luna completed review corrections;
 Sol reviews and integrates. Follows accepted Task006 map home (focused Android UI
 pass). User authorized continued work through GPX preparation, navigation
 reliability, background readiness and offline maps without frequent check-ins.
@@ -34,7 +35,16 @@ step. Use existing domain route geometry/maneuver indexes as the input boundary.
 
 The `@ride-maker/navigation` package exports the following concrete types, interfaces, and functions:
 
-### 1. `prepareNavigationRide(document: RouteDocument): PrepareNavigationRideResult`
+### 1. `prepareNavigationRide(document: RouteDocument, options?: PrepareNavigationRideOptions): PrepareNavigationRideResult`
+
+`PrepareNavigationRideOptions.guidanceUnavailableSegmentIndices` is an optional
+array of unique input-document segment indices. `reduceNavigation` also validates its
+persisted ride/state/input/config boundary and returns `NavigationResult.error`
+with a stable error code for malformed values or `SEARCH_LIMIT` when deterministic
+per-fix candidate work is exhausted. That result preserves progress and cues,
+sets quality to `unknown`, and leaves the reliable-fix baseline unchanged so a
+later input can retry safely. `createNavigationState` takes a
+prepared ride and optional config and returns the initial serializable state.
 - **Validation**:
   - Schema version check (`schemaVersion === 1`).
   - Point count & non-empty geometry checks (`segments.length > 0`, points per segment >= 2).
@@ -42,17 +52,18 @@ The `@ride-maker/navigation` package exports the following concrete types, inter
   - Single-edge geographic span bounded to <= 1.0 degree (`UNSUPPORTED_GEOMETRY`), protecting spatial compilation from unbounded resource allocation on world/antimeridian lines.
   - Zero-distance track rejection (`DEGENERATE_GEOMETRY`).
   - Structured rejection of routes without maneuvers (`code: "NO_MANEUVERS"`).
-  - Maneuver reference validation (integer segmentIndex and shapeIndex, instruction non-empty).
+  - Maneuver reference validation (integer segmentIndex and shapeIndex, stable identity, route order, instruction non-empty).
   - Maneuver coordinate alignment tolerance: verifies maneuver coordinate is within 15 meters of referenced shape point (`COORDINATE_MISMATCH`).
 - **Compilation**:
   - Produces immutable `PreparedNavigationRide` (version 1) with cumulative ride meters, segment meters, and global edge indexes.
   - Identifies physical segment gaps (> 10m) between consecutive segments and stores `gapToNextMeters`.
-  - Builds 2D grid spatial index with bounded line-rasterization (Bresenham DDA capped at 150 cells/edge) for O(1) candidate lookup on large routes up to 100k points.
+  - Builds a coordinate-based Amanatides-Woo supercover 2D grid index that includes every crossed cell, including corner-touch and grid-boundary cases. Compile input is capped at 100,000 points and edge spans at one degree; the 0.05 degree grid bounds per-edge traversal to a few dozen cells for accepted edges.
+  - Optional `prepareNavigationRide(document, { guidanceUnavailableSegmentIndices })` retains geometry/progress for listed segments and suppresses turn/repeat cues there, as well as cues that would cross an unavailable segment to reach a later covered turn. The reducer emits `guidance_unavailable` when entering one.
 
 ### 2. `createNavigationState(ride: PreparedNavigationRide, config?: NavigationConfig): NavigationState`
 - Returns pure JSON-serializable state:
-  - `lifecycle`: `"active" | "paused" | "ended"`
-  - `quality`: `"good" | "degraded"`
+  - `lifecycle`: `"active" | "paused" | "ended"`, plus serializable lifecycle timestamp and fresh-fix-after-resume threshold
+  - `quality`: `"unknown" | "good" | "degraded"`
   - `progressMeters`: cumulative progress along ride itinerary
   - `remainingMeters`: remaining distance to destination
   - `lateralDistanceMeters`: perpendicular displacement from route
@@ -79,7 +90,8 @@ The `@ride-maker/navigation` package exports the following concrete types, inter
   - `gps_degraded`: emitted when fix is inaccurate, stale (receivedAt - timestamp > 30s), or an implausible jump (> 40 m/s) occurs
   - `gps_recovered`: emitted when GPS quality recovers to good
   - `segment_gap`: emitted when approaching a physical discontinuity between segments
-  - `instruction_repeated`: emitted on user request, returning active maneuver or suppression reason (`"off_route" | "segment_gap" | "degraded_gps"`)
+  - `guidance_unavailable`: emitted on first accepted fix in a segment whose provider instructions are unavailable
+  - `instruction_repeated`: emitted on user request, returning active maneuver or suppression reason (`"off_route" | "segment_gap" | "degraded_gps" | "no_fix" | "paused" | "unavailable"`)
   - `arrival`: emitted when reaching destination on final segment within tolerance
   - `lifecycle_changed`: tracks active/paused/ended transitions
 
@@ -91,6 +103,8 @@ The `@ride-maker/navigation` package exports the following concrete types, inter
 - `maxProjectionJumpBackwardMeters`: 80 m (allows genuine reversal without forward clamping)
 - `maxLocalSearchDistanceForwardMeters`: 250 m (route-distance bounded window)
 - `maxLocalSearchDistanceBackwardMeters`: 80 m
+- `maxCandidateWorkPerFix`: 20,000 deterministic work units (enumerated grid cells/edge references and projected candidates); exhaustion yields `SEARCH_LIMIT`, never a partial accepted match
+- `maxFutureFixSkewMs`: 5,000 ms (capture timestamps farther ahead than `receivedAt` are rejected without changing the reliable baseline)
 - `candidateSearchRadiusMeters`: 120 m (spatial grid radius)
 - `headingToleranceDegrees`: 60 deg (directional check; opposing headings > 90 deg heavily penalized unless reversing)
 - `offRouteThresholdMeters`: 35 m
@@ -116,19 +130,16 @@ The `@ride-maker/navigation` package exports the following concrete types, inter
 4. **Immediate Guidance Suppression vs. Debounce Warning**:
    - Debounce hysteresis (3 fixes) prevents noisy off-route alerts from false GPS spikes. However, allowing progress to advance or turn cues to fire during the first 1-2 fixes off-route would give misleading instructions. The reducer immediately suppresses progress updates and cue announcements on poor match (`lateralDistance > 35m`), while debounce controls only the user-facing `off_route` event.
 5. **Spatial Index Memory & Line Traversal**:
-   - Naive 2D bounding box cell allocation can allocate huge numbers of grid cells for long diagonal edges. We employ Bresenham grid line rasterization capped at 150 cells per edge, and reject single edges spanning > 1.0 degree in `prepareNavigationRide`.
+   - Naive bounding-box allocation can allocate huge numbers of cells for diagonals, while integer Bresenham traversal can omit valid edges with fractional endpoints. The grid uses coordinate-based supercover traversal, a 0.05-degree cell, a 100,000-point compile limit, and the existing one-degree maximum edge span. These bounds make compile allocation finite and include endpoint cells for all accepted edges.
+6. **Per-fix Work Bound**:
+   - Both route-distance local enumeration and fallback grid-cell/reference enumeration are charged against `maxCandidateWorkPerFix`, as are projections. Exhaustion returns `SEARCH_LIMIT` with the work count and retains the prior progress/cue state. The default budget is 20,000 units; pathological superdense traces may remain temporarily unavailable while ordinary 100,000-point rides and long-interruption recovery fit within the budget.
+7. **Capture Clock Skew**:
+   - A capture timestamp may be up to 5 seconds later than `receivedAt` to allow small device-clock skew. Larger future timestamps are rejected before they can replace the reliable fix baseline.
 
 ## Verification Status
 
-The following Gemini-recorded checks preceded the interrupted Task009 storage
-interface edit. The current mobile typecheck fails on that unfinished edit; the
-root 9/9 result below is historical, not a current clean-workspace claim. Sol's
-independent package/review evidence is recorded in the linked review.
-
-- `@ride-maker/navigation`:
-  - `src/navigation.test.ts`: 27 passing tests (boundary validation, lifecycle, turn cues, hysteresis, reversals, interruption recovery, finite validation, dense out-and-back corridor, JSON serialization, 100k route).
-  - `src/sol-review.test.ts`: 3 passing acceptance tests (Sol-authored independent acceptance suite: stationary track rejection, malformed index rejection, 161-point dense out-and-back replay).
-- Root workspace:
-  - `npm run check` (turbo across 9 packages): 9/9 successful.
-  - `npx vitest run apps/mobile/src/navigation.test.ts`: 5/5 passing (existing mobile foreground helper remains untouched).
-- All changes left uncommitted for Sol review.
+Sol's fresh focused checks pass: `npm run check --workspace=@ride-maker/navigation`
+and `npm run test --workspace=@ride-maker/navigation` (43/43 tests). Scoped diff
+checks pass. See the linked acceptance review for scope, failures corrected and
+remaining integration gates; earlier workspace and foreground-helper checks are
+historical and do not establish the current app's acceptance.
