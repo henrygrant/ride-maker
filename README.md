@@ -46,7 +46,7 @@ as `ridemaker://route/ROUTE_ID` also opens a route. Web links currently need to
 be pasted into the app; universal/app links are not configured yet.
 
 The [mobile implementation plan](docs/mobile-plan.md) describes offline cycling
-navigation, shared React Strict DOM UI, validation milestones, and Sol/Gemini
+navigation, shared React Strict DOM UI, validation milestones, and Sol/Luna
 task handoffs. The
 [mobile testing strategy](docs/mobile-testing.md) defines emulator/agent access,
 Maestro flows, ride replay, standalone checks, and physical acceptance gates.
@@ -57,6 +57,12 @@ mobile creation baseline. [Task 005](docs/tasks/005-mobile-creation-redesign.md)
 accepted Concept A Floating Dock redesign. [Task 006](docs/tasks/006-map-home-and-library-sheet.md)
 defines the user-approved "One Map, Three Surfaces" architecture (Map Home, My Rides Drawer,
 and Selected Ride Dock).
+
+Current source reviews cover the [navigation engine](docs/reviews/007-sol-engine-acceptance.md),
+[GPX preparation and persistence](docs/reviews/008-009-sol-core-acceptance.md), and
+[mobile integration](docs/reviews/012-sol-mobile-integration-review.md). Android
+verification of these new workflows, durable background sessions and offline maps
+remain active work; physical riding acceptance is still pending.
 
 Per user agreement, testing follows a selective testing policy: prioritize targeted
 smoke and focused journey validation to catch genuine product and UI issues while halting

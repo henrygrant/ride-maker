@@ -1,19 +1,25 @@
 # Ride Maker mobile plan
 
 Status: phone-first app with local rides, route creation, foreground guidance
-and accepted map-home/floating-dock UI. Prepared GPX navigation, robust engine,
-background field validation and offline map support are the active next phase. Sol owns architecture, task contracts, integration,
-and review. Gemini implements individual task briefs using the selected delegated model. Use T3 delegated
-tasks for Gemini implementation and review rounds; keep task contracts and
-evidence in this repository.
+and accepted map-home/floating-dock UI. The navigation engine, GPX preparation,
+prepared-route storage and mobile source integration have passed their scoped
+reviews. Native workflow verification, durable background sessions and offline
+maps are active work. Sol owns architecture, task contracts, integration,
+and review. Luna implements individual task briefs following Henry's model switch
+after Gemini exhausted its quota on 2026-10-14. Use native delegated agents for
+Luna, with the full brief and findings supplied for each review round; keep task contracts
+and evidence in this repository. Earlier Gemini evidence remains historical.
 
 The [mobile testing strategy](mobile-testing.md) governs feature acceptance.
 [Task 002: E2E foundation](tasks/002-mobile-test-foundation.md) is accepted.
 [Task 003: local GPX import and saved routes](tasks/003-local-gpx-import.md) is accepted.
 [Task004: mobile creation and primary surfaces](tasks/004-mobile-ride-creation.md)
 is accepted for Android emulator creation and library management; evidence is recorded
-in [the review](reviews/004-sol-mobile-creation-review.md). Prepared-ride contracts
-and the navigation engine follow; the existing [background spike](tasks/001-background-spike.md)
+in [the review](reviews/004-sol-mobile-creation-review.md). The current source
+reviews cover the [engine](reviews/007-sol-engine-acceptance.md),
+[preparation/storage](reviews/008-009-sol-core-acceptance.md) and
+[mobile integration](reviews/012-sol-mobile-integration-review.md).
+The existing [background spike](tasks/001-background-spike.md)
 still needs physical field evidence. The website remains an optional companion.
 
 ## Goal and first release
@@ -51,11 +57,12 @@ navigating; report and recover interrupted sessions when it is reopened.
   imports GPX files and preserves originals/snapshots in private storage with
   SQLite metadata. Created directions reopen offline; raw imports reopen as
   previews. My rides prioritizes the local library, with shared/public access
-  secondary. Turn preparation,
-  offline map downloads and background guidance remain pending.
-  Its navigation helper and tests live in `apps/mobile/src/navigation.*`.
-  Existing progress is clamped forward and ignores fix timestamps; replace those
-  limitations through reviewed contracts, rather than treating it as field-ready.
+  secondary. GPX preparation and review now use the original-preserving prepared
+  storage boundary. Foreground guidance uses `packages/navigation`, including fix
+  timestamps, bounded spatial matching and unavailable-section suppression.
+  These source changes await focused Android workflow acceptance. Offline map
+  downloads and durable background guidance remain in implementation/review;
+  physical riding readiness is unproven.
 - `packages/ui` uses React Strict DOM and shared design tokens.
 - `packages/domain` stores segments, control points, and indexed maneuvers.
 - `packages/gpx` imports tracks/routes and exports GPX; imported files have no
@@ -208,19 +215,20 @@ network calls never become prerequisites for an already-downloaded ride.
 Keep the canonical plan and task briefs in this Git repository. Obsidian is an
 optional project-note view and is not a build dependency. Sol issues one bounded
 task at a time with owned files, interfaces, acceptance checks, and escalation
-conditions. Gemini reports files changed, commands run, failures, and unresolved
+conditions. Luna reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
 Tasks003–005 are accepted for their recorded Android emulator scopes. Task006
 map home is accepted as a focused UI pass; its full updated regression suite has
-not been accepted. Current implementation task:
-[task007](tasks/007-navigation-engine.md), the prepared-ride boundary and pure
-navigation engine. Next: GPX matching/review and original-preserving prepared
-storage, app engine integration, background session readiness, and offline map
-packs. Sol reviews each bounded Gemini implementation and continues without
+not been accepted. Tasks007–009 have passed pure-engine and preparation/storage
+reviews; Task012 has passed source/controller integration review. Current work is
+[durable sessions](tasks/010-navigation-session.md),
+[offline maps](tasks/011-offline-route-maps.md), their mobile integration, and
+focused native acceptance for the new GPX workflow. Sol reviews each bounded
+Luna implementation and continues without
 routine owner check-ins. Only physical riding evidence requires owner action.
 Use focused verification suited to each change; avoid stale-data retry loops.
-Architecture/schema/deployment decisions remain reviewed by Sol before Gemini
+Architecture/schema/deployment decisions remain reviewed by Sol before Luna
 implements them. Production matching and tile coverage/provider choices require
 resource, terms and operational assessment before deployment.
 

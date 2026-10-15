@@ -29,7 +29,10 @@ again rather than silently transferring the ready badge.
 The existing OpenFreeMap style is the initial bounded provider. Its current mobile
 policy permits at most 3,000 tiles OR 50 MB per download, at most four concurrent
 requests, and an identifying User-Agent. Use conservative preflight limits plus
-the native tile-count ceiling. Record the native pack's actual completed/required
+an enforced download bound for this provider. MapLibre's
+`setOfflineMapboxTileCountLimit` applies only to Mapbox-hosted sources, so its
+JavaScript `setTileCountLimit` wrapper does not establish an OpenFreeMap ceiling.
+Record the native pack's actual completed/required
 resource and tile counts/sizes. Any byte-based guard must account for in-flight
 resources; a progress callback cannot guarantee zero byte overshoot by itself.
 
@@ -85,3 +88,7 @@ after the run. Do not claim iOS or physical riding evidence from these checks.
 - [MapLibre OfflineManager](https://maplibre.org/maplibre-react-native/docs/modules/offline-manager/).
 - Installed source: `@maplibre/maplibre-react-native` 11.4.0,
   `src/modules/offline/` and Android `MLRNTransformRequestModule.kt`.
+- [MapLibre Native offline observer contract](https://maplibre.org/maplibre-native/cpp/api/offline_8hpp_source.html):
+  the Mapbox tile-count limit excludes other tile sources. Pinned Android
+  `MLRNOfflineModule.setOfflineRegionObserver` also starts downloading when an
+  observer is attached; observation must preserve paused state in this app.
