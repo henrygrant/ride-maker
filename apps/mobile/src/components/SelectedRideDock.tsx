@@ -20,6 +20,9 @@ export type SelectedRideDockProps = {
   route: DisplayRoute;
   onOpenLibrary: () => void;
   onStartNavigation: () => void;
+  onPrepareDirections: () => void;
+  onPreviewOriginal: () => void;
+  onRevertPreparation: () => void;
   onRenameRide: (newName: string) => Promise<void>;
   onDeleteRide: () => Promise<void>;
   bottomInset?: number;
@@ -30,6 +33,9 @@ export function SelectedRideDock({
   route,
   onOpenLibrary,
   onStartNavigation,
+  onPrepareDirections,
+  onPreviewOriginal,
+  onRevertPreparation,
   onRenameRide,
   onDeleteRide,
   bottomInset = 16,
@@ -93,7 +99,19 @@ export function SelectedRideDock({
   const isImportedLocal =
     route.kind === "local" && (!route.sourceKind || route.sourceKind === "imported");
   const validation = validateRouteInstructions(route.document);
-  const canNavigate = !isImportedLocal && validation.ready;
+  const prep = route.preparationMetadata;
+  const preparedStatus = prep?.status === "ready" || prep?.status === "partial";
+  const coverageRows = prep?.outputCoverage ?? [];
+  const coverageValid = coverageRows.length === route.document.segments.length &&
+    new Set(coverageRows.map((row) => row.outputSegmentIndex)).size === route.document.segments.length &&
+    coverageRows.every((row) => Number.isInteger(row.outputSegmentIndex) && row.outputSegmentIndex >= 0 && row.outputSegmentIndex < route.document.segments.length && (!row.guidanceAvailable || row.matched)) &&
+    coverageRows.some((row) => row.guidanceAvailable && row.matched) &&
+    (prep?.status !== "ready" || coverageRows.every((row) => row.guidanceAvailable && row.matched));
+  const canNavigate = !route.previewingOriginal && validation.ready && (
+    route.kind === "remote" || route.sourceKind === "created" ||
+    (isImportedLocal && preparedStatus && coverageValid)
+  );
+  const isPartial = canNavigate && prep?.status === "partial";
 
   const handleDockLayout = (e: LayoutChangeEvent) => {
     const h = e.nativeEvent.layout.height;
@@ -196,6 +214,21 @@ export function SelectedRideDock({
             >
               <Text style={styles.menuItemDeleteText}>Delete ride</Text>
             </Pressable>
+            {route.activeVersionId && route.originalDocument && !route.recoveryAvailable && <>
+              <View style={styles.menuDivider} />
+              <Pressable accessibilityRole="button" accessibilityLabel={route.previewingOriginal ? "Preview prepared directions" : "Preview original GPX"} onPress={onPreviewOriginal} style={styles.menuItem}>
+                <Text style={styles.menuItemText}>{route.previewingOriginal ? "Preview prepared directions" : "Preview original GPX"}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Revert to original GPX" onPress={onRevertPreparation} style={styles.menuItem}>
+                <Text style={styles.menuItemText}>Revert to original GPX</Text>
+              </Pressable>
+            </>}
+            {route.recoveryAvailable && <>
+              <View style={styles.menuDivider} />
+              <Pressable accessibilityRole="button" accessibilityLabel="Recover original GPX" onPress={onRevertPreparation} style={styles.menuItem}>
+                <Text style={styles.menuItemText}>Recover original GPX</Text>
+              </Pressable>
+            </>}
           </View>
         </View>
       )}
@@ -254,7 +287,7 @@ export function SelectedRideDock({
                 canNavigate ? styles.readyBadgeTextActive : styles.readyBadgeTextPreview,
               ]}
             >
-              {canNavigate ? "Directions ready" : "Preview only"}
+              {isPartial ? "Partial directions" : canNavigate ? "Directions ready" : "Preview only"}
             </Text>
           </View>
         </View>
@@ -271,8 +304,14 @@ export function SelectedRideDock({
         {!canNavigate && (
           <View testID="view-guidance-notice" style={styles.noticeBox}>
             <Text testID="text-guidance-notice" style={styles.noticeText}>
-              {isImportedLocal
-                ? "Turn-by-turn guidance is not available for raw GPX imports."
+              {route.recoveryAvailable
+                ? "Prepared directions could not be opened. The original GPX is available for recovery."
+                : route.previewingOriginal
+                ? "You are previewing the original GPX. Prepared directions remain saved."
+                : isImportedLocal && prep?.status === "partial"
+                ? "Some sections have no turn guidance. That warning remains accessible during navigation."
+                : isImportedLocal
+                ? "Preparing directions sends this GPX trace to the online matching service. Raw GPX imports stay preview only until you prepare them."
                 : validation.reason ?? "Turn-by-turn directions are not ready for this route."}
             </Text>
           </View>
@@ -289,6 +328,11 @@ export function SelectedRideDock({
           >
             <Text style={styles.secondaryButtonText}>≡ My rides</Text>
           </Pressable>
+          {isImportedLocal && !route.recoveryAvailable && !route.activeVersionId && (
+            <Pressable testID="button-prepare-directions" accessibilityRole="button" accessibilityLabel="Prepare directions online" onPress={onPrepareDirections} style={[styles.button, styles.primaryButton]}>
+              <Text style={styles.primaryButtonText}>Prepare directions</Text>
+            </Pressable>
+          )}
           {canNavigate && (
             <Pressable
               testID="button-navigation-toggle"
@@ -298,7 +342,7 @@ export function SelectedRideDock({
               style={[styles.button, styles.primaryButton]}
             >
               <Text style={styles.primaryButtonText}>
-                {route.kind === "remote" ? "Start navigation" : "Ride"}
+                {isPartial ? "Ride with partial directions" : route.kind === "remote" ? "Start navigation" : "Ride"}
               </Text>
             </Pressable>
           )}

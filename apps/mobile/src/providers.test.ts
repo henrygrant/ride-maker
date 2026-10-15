@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createDefaultGeocodingProvider, createDefaultRoutingProvider } from "./providers";
-import { ValhallaRoutingProvider } from "@ride-maker/routing";
+import { createDefaultGeocodingProvider, createDefaultRoutingProvider, createDefaultTraceMatchingProvider } from "./providers";
+import { ValhallaRoutingProvider, ValhallaTraceMatchingProvider } from "@ride-maker/routing";
 import { PhotonGeocodingProvider } from "@ride-maker/geocoding";
 
 describe("Provider Configuration Isolation", () => {
@@ -11,6 +11,7 @@ describe("Provider Configuration Isolation", () => {
     delete process.env.EXPO_PUBLIC_GEOCODING_URL;
     delete process.env.EXPO_PUBLIC_TEST_MODE;
     delete process.env.EXPO_PUBLIC_API_URL;
+    delete process.env.EXPO_PUBLIC_TRACE_MATCHING_URL;
   });
 
   afterEach(() => {
@@ -20,12 +21,15 @@ describe("Provider Configuration Isolation", () => {
   it("defaults to public OSM Valhalla and Komoot Photon when no env vars are set", () => {
     const routing = createDefaultRoutingProvider() as unknown as { endpoint: string };
     const geocoding = createDefaultGeocodingProvider() as unknown as { endpoint: string };
+    const trace = createDefaultTraceMatchingProvider() as unknown as { endpoint: string };
 
     expect(routing).toBeInstanceOf(ValhallaRoutingProvider);
     expect(routing.endpoint).toBe("https://valhalla1.openstreetmap.de/route");
 
     expect(geocoding).toBeInstanceOf(PhotonGeocodingProvider);
     expect(geocoding.endpoint).toBe("https://photon.komoot.io");
+    expect(trace).toBeInstanceOf(ValhallaTraceMatchingProvider);
+    expect(trace.endpoint).toBe("https://valhalla1.openstreetmap.de/trace_route");
   });
 
   it("does NOT derive test endpoints from EXPO_PUBLIC_API_URL unless EXPO_PUBLIC_TEST_MODE is strictly 'true'", () => {
@@ -34,10 +38,12 @@ describe("Provider Configuration Isolation", () => {
 
     const routing = createDefaultRoutingProvider() as unknown as { endpoint: string };
     const geocoding = createDefaultGeocodingProvider() as unknown as { endpoint: string };
+    const trace = createDefaultTraceMatchingProvider() as unknown as { endpoint: string };
 
     // Must remain isolated on public endpoints
     expect(routing.endpoint).toBe("https://valhalla1.openstreetmap.de/route");
     expect(geocoding.endpoint).toBe("https://photon.komoot.io");
+    expect(trace.endpoint).toBe("https://valhalla1.openstreetmap.de/trace_route");
   });
 
   it("derives test fixture endpoints when EXPO_PUBLIC_TEST_MODE === 'true'", () => {
@@ -46,9 +52,11 @@ describe("Provider Configuration Isolation", () => {
 
     const routing = createDefaultRoutingProvider() as unknown as { endpoint: string };
     const geocoding = createDefaultGeocodingProvider() as unknown as { endpoint: string };
+    const trace = createDefaultTraceMatchingProvider() as unknown as { endpoint: string };
 
     expect(routing.endpoint).toBe("http://10.0.2.2:8088/route");
     expect(geocoding.endpoint).toBe("http://10.0.2.2:8088/geocoding");
+    expect(trace.endpoint).toBe("http://10.0.2.2:8088/trace_route");
   });
 
   it("honors explicit overrides over test mode derivation", () => {
@@ -56,11 +64,14 @@ describe("Provider Configuration Isolation", () => {
     process.env.EXPO_PUBLIC_TEST_MODE = "true";
     process.env.EXPO_PUBLIC_ROUTING_URL = "http://custom-valhalla.internal/route";
     process.env.EXPO_PUBLIC_GEOCODING_URL = "http://custom-photon.internal";
+    process.env.EXPO_PUBLIC_TRACE_MATCHING_URL = "https://custom-valhalla.internal/trace_route";
 
     const routing = createDefaultRoutingProvider() as unknown as { endpoint: string };
     const geocoding = createDefaultGeocodingProvider() as unknown as { endpoint: string };
+    const trace = createDefaultTraceMatchingProvider() as unknown as { endpoint: string };
 
     expect(routing.endpoint).toBe("http://custom-valhalla.internal/route");
     expect(geocoding.endpoint).toBe("http://custom-photon.internal");
+    expect(trace.endpoint).toBe("https://custom-valhalla.internal/trace_route");
   });
 });

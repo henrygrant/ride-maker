@@ -8,7 +8,10 @@ import * as DocumentPicker from "expo-document-picker";
 import { useKeepAwake } from "expo-keep-awake";
 import type { RouteDocument } from "@ride-maker/domain";
 import type { SavedRoute } from "@ride-maker/persistence";
-import { buildNavigationTrack, formatDistance, navigationFix, type NavigationFix } from "./navigation";
+import { formatDistance } from "./navigation";
+import { createNavigationState, prepareNavigationRide, type NavigationEvent, type NavigationInput, type NavigationState, type PreparedNavigationRide } from "@ride-maker/navigation";
+import { createDefaultTraceMatchingProvider } from "./providers";
+import { polylineDistance } from "@ride-maker/routing";
 import { routeIdFromLink } from "./route-view";
 import { DiagnosticsView } from "./diagnostics/DiagnosticsView";
 import { FileSystemDiagnosticStorage } from "./diagnostics/file-storage";
@@ -16,6 +19,7 @@ import { createDefaultRouteRepository } from "./route-repository";
 import {
   createDefaultLocalStorage,
   observeLocalStorage,
+  buildSourceIdentityToken,
   type LocalRouteRecord,
 } from "./storage";
 import { seedSyntheticLibrary } from "./storage/synthetic-library";
@@ -25,10 +29,14 @@ import { CreateRideScreen } from "./screens/CreateRideScreen";
 import type { ControllerDraftSnapshot } from "./controllers/create-ride-controller";
 import { ActiveNavigationScreen } from "./screens/ActiveNavigationScreen";
 import { MainMapScreen } from "./screens/MainMapScreen";
+import { PrepareRideController, type PreparationState } from "./controllers/prepare-ride-controller";
+import { ForegroundSpeechQueue } from "./controllers/foreground-speech-queue";
+import { dispatchForegroundNavigation } from "./controllers/foreground-navigation-dispatch";
 export type { DisplayRoute };
 
 const repository = createDefaultRouteRepository();
 const diagnosticStorage = new FileSystemDiagnosticStorage();
+const traceMatchingProvider = createDefaultTraceMatchingProvider();
 
 let defaultLocalStorage: ReturnType<typeof createDefaultLocalStorage> | null = null;
 function getLocalStorage() {
@@ -36,6 +44,23 @@ function getLocalStorage() {
     defaultLocalStorage = createDefaultLocalStorage();
   }
   return defaultLocalStorage;
+}
+
+function displayLocalRoute(loaded: import("./storage").SavedLocalRoute, recoveryAvailable = false): DisplayRoute {
+  const distanceFor = (document: RouteDocument) => document.summary?.distanceMeters ?? document.segments.reduce((sum, segment) => sum + polylineDistance(segment.points), 0);
+  const showOriginal = recoveryAvailable;
+  return {
+    id: loaded.record.id,
+    kind: "local",
+    sourceKind: loaded.record.sourceKind ?? (loaded.document.source.kind === "gpx" ? "imported" : "created"),
+    distanceMeters: showOriginal ? distanceFor(loaded.originalDocument ?? loaded.document) : loaded.record.distanceMeters,
+    document: loaded.document,
+    ...(loaded.originalDocument ? { originalDocument: loaded.originalDocument } : {}),
+    ...(loaded.preparationMetadata !== undefined ? { preparationMetadata: loaded.preparationMetadata } : {}),
+    ...(loaded.activeVersionId !== undefined ? { activeVersionId: loaded.activeVersionId } : {}),
+    recoveryAvailable,
+    sourceIdentityToken: buildSourceIdentityToken(loaded.record),
+  };
 }
 
 export default function App() {
@@ -50,14 +75,29 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [navigating, setNavigating] = useState(false);
   const [position, setPosition] = useState<Location.LocationObjectCoords | null>(null);
-  const [fix, setFix] = useState<NavigationFix | null>(null);
-  const [offRoute, setOffRoute] = useState(false);
-  const [poorGps, setPoorGps] = useState(false);
+  const [navigationRide, setNavigationRide] = useState<PreparedNavigationRide | null>(null);
+  const [navigationState, setNavigationState] = useState<NavigationState | null>(null);
+  const [navigationError, setNavigationError] = useState<string | null>(null);
+  const [preparationState, setPreparationState] = useState<PreparationState>({ status: "idle" });
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [testVerified, setTestVerified] = useState(false);
   const [testSamplesReady, setTestSamplesReady] = useState(false);
-  const progressRef = useRef(0);
   const spokenRef = useRef(new Set<string>());
+  const navigationStateRef = useRef<NavigationState | null>(null);
+  const navigationRideRef = useRef<PreparedNavigationRide | null>(null);
+  const navigationErrorRef = useRef<string | null>(null);
+  const voiceEnabledRef = useRef(true);
+  const routeRef = useRef<DisplayRoute | null>(null);
+  const speechQueueRef = useRef<ForegroundSpeechQueue | null>(null);
+  if (speechQueueRef.current === null) {
+    speechQueueRef.current = new ForegroundSpeechQueue(() => Speech.stop(), (text) => Speech.speak(text));
+  }
+
+  routeRef.current = route;
+  voiceEnabledRef.current = voiceEnabled;
+  navigationStateRef.current = navigationState;
+  navigationRideRef.current = navigationRide;
+  navigationErrorRef.current = navigationError;
   const importInProgressRef = useRef(false);
   const sampleCounterRef = useRef(0);
 
@@ -89,8 +129,23 @@ export default function App() {
     }
   }, []);
 
+  const preparationController = useMemo(() => new PrepareRideController({
+    storage: getLocalStorage().storage,
+    provider: traceMatchingProvider,
+    getSelectedRoute: () => routeRef.current,
+    onAccepted: async (saved) => {
+      setRoute(displayLocalRoute(saved));
+      setViewMode("routes");
+      await refreshLocalRoutes();
+    },
+  }), [refreshLocalRoutes]);
+
+  useEffect(() => preparationController.subscribe(setPreparationState), [preparationController]);
+  useEffect(() => () => preparationController.cancel(), [preparationController]);
+  useEffect(() => { preparationController.selectionChanged(); }, [preparationController, route?.id]);
+
   const handleSeedSyntheticLibrary = useCallback(async () => {
-    if (!isTestMode) return;
+    if (!isTestMode || !preparationController.canChangeSelection()) return;
     try {
       const { storage } = getLocalStorage();
       await seedSyntheticLibrary(storage);
@@ -98,14 +153,16 @@ export default function App() {
     } catch (err) {
       console.error("[SEED_SYNTHETIC_LIBRARY_ERROR]", err);
     }
-  }, [isTestMode, refreshLocalRoutes]);
+  }, [isTestMode, refreshLocalRoutes, preparationController]);
 
   const openRoute = useCallback(async (id: string) => {
+    if (!preparationController.canChangeSelection()) return;
     setBusy(true);
     setError(null);
     try {
       setNavigating(false);
       const fetched = await repository.get(id);
+      if (!preparationController.canChangeSelection()) return;
       setRoute({
         id: fetched.id,
         slug: fetched.slug,
@@ -118,29 +175,32 @@ export default function App() {
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [preparationController]);
 
   const openLocalRoute = useCallback(async (id: string) => {
+    if (!preparationController.canChangeSelection()) return;
     setBusy(true);
     setError(null);
     try {
       setNavigating(false);
       const { storage } = getLocalStorage();
-      const loaded = await storage.getRoute(id);
-      setRoute({
-        id: loaded.record.id,
-        kind: "local",
-        sourceKind: loaded.record.sourceKind ?? "imported",
-        distanceMeters: loaded.record.distanceMeters,
-        document: loaded.document,
-      });
+      let loaded: import("./storage").SavedLocalRoute;
+      let recoveryAvailable = false;
+      try { loaded = await storage.getRoute(id); }
+      catch (cause) {
+        loaded = await storage.getOriginalRoute(id);
+        recoveryAvailable = Boolean(loaded.record.activePreparationId);
+        if (!recoveryAvailable) throw cause;
+      }
+      if (!preparationController.canChangeSelection()) return;
+      setRoute(displayLocalRoute(loaded, recoveryAvailable));
       setViewMode("routes");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not load saved route.");
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [preparationController]);
 
   const refresh = useCallback(async () => {
     setBusy(true);
@@ -213,7 +273,7 @@ export default function App() {
   }, [isTestMode, openRoute, emitTestObservation, handleSeedSyntheticLibrary]);
 
   const handleImportGpx = useCallback(async () => {
-    if (importInProgressRef.current) return;
+    if (importInProgressRef.current || !preparationController.canChangeSelection()) return;
     importInProgressRef.current = true;
     setBusy(true);
     setError(null);
@@ -226,6 +286,7 @@ export default function App() {
       if (result.canceled || !result.assets || result.assets.length === 0) {
         return;
       }
+      if (!preparationController.canChangeSelection()) return;
 
       const asset = result.assets[0];
       if (!asset) return;
@@ -239,14 +300,9 @@ export default function App() {
 
       // Open imported route in preview mode
       const loaded = await storage.getRoute(record.id);
+      if (!preparationController.canChangeSelection()) return;
       setNavigating(false);
-      setRoute({
-        id: loaded.record.id,
-        kind: "local",
-        sourceKind: loaded.record.sourceKind ?? "imported",
-        distanceMeters: loaded.record.distanceMeters,
-        document: loaded.document,
-      });
+      setRoute(displayLocalRoute(loaded));
       setViewMode("routes");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Failed to import GPX file.");
@@ -254,7 +310,7 @@ export default function App() {
       importInProgressRef.current = false;
       setBusy(false);
     }
-  }, []);
+  }, [preparationController]);
 
   const openInput = useCallback(() => {
     const id = routeIdFromLink(input);
@@ -266,64 +322,118 @@ export default function App() {
   }, [input, openRoute]);
 
   const saveCreated = useCallback(async (document: RouteDocument) => {
+    if (!preparationController.canChangeSelection()) return;
     const { storage } = getLocalStorage();
     const record = await storage.saveCreatedRoute(document);
+    if (!preparationController.canChangeSelection()) return;
     await refreshLocalRoutes();
     setDraftRide(null);
-    setRoute({ id: record.id, kind: "local", sourceKind: "created", distanceMeters: record.distanceMeters, document });
+    setRoute(displayLocalRoute(await storage.getRoute(record.id)));
     setNavigating(false);
     setViewMode("routes");
-  }, [refreshLocalRoutes]);
+  }, [refreshLocalRoutes, preparationController]);
 
   const renameRide = useCallback(async (name: string) => {
-    if (!route || route.kind !== "local") return;
+    if (!route || route.kind !== "local" || !preparationController.canChangeSelection()) return;
     const { storage } = getLocalStorage();
     await storage.renameRoute(route.id, name);
     const saved = await storage.getRoute(route.id);
-    setRoute({ ...route, document: saved.document });
+    setRoute(displayLocalRoute(saved));
     await refreshLocalRoutes();
-  }, [route, refreshLocalRoutes]);
+  }, [route, refreshLocalRoutes, preparationController]);
 
   const deleteRide = useCallback(async () => {
-    if (!route || route.kind !== "local") return;
+    if (!route || route.kind !== "local" || !preparationController.canChangeSelection()) return;
     const { storage } = getLocalStorage();
     await storage.deleteRoute(route.id);
     setRoute(null);
     setViewMode("routes");
     await refreshLocalRoutes();
-  }, [route, refreshLocalRoutes]);
+  }, [route, refreshLocalRoutes, preparationController]);
 
-  const track = useMemo(() => {
-    if (!route) return null;
-    return buildNavigationTrack(route.document);
-  }, [route]);
+  const unavailableSegmentIndices = useMemo(() => route?.preparationMetadata?.outputCoverage
+    .filter((coverage) => !coverage.guidanceAvailable || !coverage.matched)
+    .map((coverage) => coverage.outputSegmentIndex) ?? [], [route?.preparationMetadata]);
+  const navigationCandidate = useMemo(() => route
+    ? prepareNavigationRide(route.document, { guidanceUnavailableSegmentIndices: unavailableSegmentIndices })
+    : null, [route?.document, unavailableSegmentIndices]);
 
-  const startNavigation = async () => {
-    if (!track) {
-      setError("This route has no usable track to follow.");
+  const announceEvents = useCallback((events: readonly NavigationEvent[]) => {
+    const lifecycleEnded = events.some((event) => event.type === "lifecycle_changed" && event.currentLifecycle !== "active");
+    if (lifecycleEnded) {
+      spokenRef.current.clear();
+      speechQueueRef.current?.invalidate();
+      void Speech.stop();
       return;
     }
+    if (!voiceEnabledRef.current) return;
+    const event = events.find((item) => item.type === "arrival" || item.type === "immediate_maneuver" || item.type === "instruction_repeated" || item.type === "off_route" || item.type === "gps_degraded" || item.type === "guidance_unavailable" || item.type === "upcoming_maneuver");
+    if (!event || spokenRef.current.has(event.id)) return;
+    spokenRef.current.add(event.id);
+    const text = event.type === "arrival" ? "You have arrived."
+      : event.type === "immediate_maneuver" ? event.maneuver.instruction
+      : event.type === "upcoming_maneuver" ? `In ${formatDistance(event.distanceToManeuverMeters)}, ${event.maneuver.instruction}`
+      : event.type === "instruction_repeated" ? (event.maneuver ? event.maneuver.instruction : "Guidance is unavailable right now.")
+      : event.type === "off_route" ? "You are off route. Follow the map to rejoin the route."
+      : event.type === "gps_degraded" ? "GPS signal is poor. Waiting for a reliable location."
+      : event.type === "guidance_unavailable" ? "Turn guidance is unavailable for this section."
+      : null;
+    if (!text) return;
+    speechQueueRef.current?.enqueue(text, () => voiceEnabledRef.current);
+  }, []);
 
+  const dispatchNavigation = useCallback((inputValue: NavigationInput) => {
+    const activeRide = navigationRideRef.current;
+    const previous = navigationStateRef.current;
+    if (!activeRide || !previous) return;
+    const outcome = dispatchForegroundNavigation(activeRide, previous, inputValue, navigationErrorRef.current);
+    navigationStateRef.current = outcome.state;
+    navigationErrorRef.current = outcome.error;
+    setNavigationState(outcome.state);
+    setNavigationError(outcome.error);
+    if (outcome.shouldAnnounce) announceEvents(outcome.events);
+  }, [announceEvents]);
+
+  const startNavigation = async () => {
+    if (!route || !navigationCandidate?.ok) {
+      setError(navigationCandidate && !navigationCandidate.ok ? navigationCandidate.error.message : "This route has no usable directions to follow.");
+      return;
+    }
+    const prep = route.preparationMetadata;
+    const outputCoverage = prep?.outputCoverage ?? [];
+    const hasGuidedCoverage = outputCoverage.length === route.document.segments.length &&
+      new Set(outputCoverage.map((coverage) => coverage.outputSegmentIndex)).size === route.document.segments.length &&
+      outputCoverage.every((coverage) => Number.isInteger(coverage.outputSegmentIndex) && coverage.outputSegmentIndex >= 0 && coverage.outputSegmentIndex < route.document.segments.length && (!coverage.guidanceAvailable || coverage.matched)) &&
+      outputCoverage.some((coverage) => coverage.guidanceAvailable && coverage.matched) &&
+      (prep?.status !== "ready" || outputCoverage.every((coverage) => coverage.guidanceAvailable && coverage.matched));
+    const importedPrepared = route.kind === "local" && route.sourceKind === "imported" && !route.previewingOriginal &&
+      (prep?.status === "ready" || prep?.status === "partial") && prep.sourceId === route.id && prep.sourceKind === route.document.source.kind && hasGuidedCoverage;
+    const validatedDirections = route.document.maneuvers.length > 0 && (route.kind === "remote" || route.sourceKind === "created" || importedPrepared);
+    if (!validatedDirections) {
+      setError("Prepare and review directions before navigating this GPX.");
+      return;
+    }
     try {
       const activeDiag = await diagnosticStorage.getSession();
       if (activeDiag && activeDiag.status === "running") {
         setError("Please stop active background diagnostics before starting route navigation.");
         return;
       }
-    } catch {
-      // Continue if diagnostic storage check fails
-    }
-
-    void Speech.stop();
-
+    } catch { /* Continue when diagnostic storage is unavailable. */ }
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
-      if (permission.status !== "granted") {
-        setError("Allow location access to follow this route.");
-        return;
-      }
-      progressRef.current = 0;
+      if (permission.status !== "granted") { setError("Allow location access to follow this route."); return; }
+      void Speech.stop();
+      speechQueueRef.current?.invalidate();
       spokenRef.current.clear();
+      const engineRide = navigationCandidate.ride;
+      const initialState = createNavigationState(engineRide);
+      navigationRideRef.current = engineRide;
+      navigationStateRef.current = initialState;
+      setNavigationRide(engineRide);
+      setNavigationState(initialState);
+      setNavigationError(null);
+      setPosition(null);
       setError(null);
       setNavigating(true);
     } catch (cause) {
@@ -332,19 +442,35 @@ export default function App() {
   };
 
   const stopNavigation = useCallback(() => {
+    speechQueueRef.current?.invalidate();
+    dispatchNavigation({ type: "end", timestamp: Date.now() });
     setNavigating(false);
-    setOffRoute(false);
-    setPoorGps(false);
-    setFix(null);
     setPosition(null);
+    navigationRideRef.current = null;
+    navigationStateRef.current = null;
+    setNavigationRide(null);
+    setNavigationState(null);
+    setNavigationError(null);
     void Speech.stop();
-  }, []);
+  }, [dispatchNavigation]);
 
   useEffect(() => {
-    if (!navigating || !track) return;
+    if (!voiceEnabled) {
+      speechQueueRef.current?.invalidate();
+      void Speech.stop();
+    }
+  }, [voiceEnabled]);
+
+  useEffect(() => {
+    speechQueueRef.current?.invalidate();
+    spokenRef.current.clear();
+    void Speech.stop();
+  }, [route?.id]);
+
+  useEffect(() => {
+    if (!navigating || !navigationRide) return;
     let cancelled = false;
     let subscription: Location.LocationSubscription | null = null;
-
     void Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
       (location) => {
@@ -355,91 +481,72 @@ export default function App() {
           console.log(`[E2E_NAV_PROVIDER_SAMPLE] count=${sampleCounterRef.current} lat=${coords.latitude} lon=${coords.longitude}`);
         }
         setPosition(coords);
-        const accuracy = coords.accuracy ?? 100;
-        const unreliable = accuracy > 100;
-        setPoorGps(unreliable);
-        if (unreliable) return;
-        const nextFix = navigationFix(track, coords, progressRef.current);
-        const isOffRoute = nextFix.offRouteMeters > Math.max(50, accuracy * 2);
-        setOffRoute(isOffRoute);
-        if (isOffRoute) return;
-        progressRef.current = Math.max(progressRef.current, nextFix.progressMeters);
-        setFix(nextFix);
-        if (!voiceEnabled) return;
-        if (nextFix.arrived) {
-          if (!spokenRef.current.has("arrived")) {
-            spokenRef.current.add("arrived");
-            void Speech.stop().then(() => { if (!cancelled) Speech.speak("You have arrived."); });
-          }
-          return;
-        }
-        const next = nextFix.next;
-        const meters = nextFix.distanceToNextMeters;
-        if (!next || meters === null) return;
-        const nowKey = `${next.maneuver.id}:now`;
-        const approachKey = `${next.maneuver.id}:approach`;
-        if (meters <= 30 && !spokenRef.current.has(nowKey)) {
-          spokenRef.current.add(nowKey);
-          spokenRef.current.add(approachKey);
-          void Speech.stop().then(() => { if (!cancelled) Speech.speak(next.maneuver.instruction); });
-        } else if (meters <= 150 && !spokenRef.current.has(approachKey)) {
-          spokenRef.current.add(approachKey);
-          void Speech.stop().then(() => { if (!cancelled) Speech.speak(`In ${formatDistance(meters)}, ${next.maneuver.instruction}`); });
-        }
+        const inputValue: NavigationInput = {
+          type: "location_fix",
+          timestamp: Math.trunc(location.timestamp),
+          receivedAt: Date.now(),
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracyMeters: coords.accuracy ?? 100,
+          ...(typeof coords.speed === "number" && coords.speed >= 0 ? { speedMetersPerSecond: coords.speed } : {}),
+          ...(typeof coords.heading === "number" && coords.heading >= 0 && coords.heading <= 360 ? { headingDegrees: coords.heading } : {}),
+        };
+        dispatchNavigation(inputValue);
       },
-      (cause) => { if (!cancelled) setError(cause); },
+      (cause) => { if (!cancelled) setNavigationError(cause); },
     ).then((result) => {
-      if (cancelled) {
-        result.remove();
-        if (isTestMode) {
-          console.log(`[E2E_NAV_PROVIDER] unsubscribed=true totalSamples=${sampleCounterRef.current}`);
-        }
-      } else {
-        subscription = result;
-        if (isTestMode) console.log("[E2E_NAV_PROVIDER] subscribed=true");
-      }
+      if (cancelled) result.remove();
+      else { subscription = result; if (isTestMode) console.log("[E2E_NAV_PROVIDER] subscribed=true"); }
     }).catch((cause: unknown) => {
-      if (!cancelled) {
-        setNavigating(false);
-        setError(cause instanceof Error ? cause.message : "Location tracking failed.");
-      }
+      if (!cancelled) { setNavigating(false); setNavigationError(cause instanceof Error ? cause.message : "Location tracking failed."); }
     });
     return () => {
       cancelled = true;
-      if (subscription) {
-        subscription.remove();
-        if (isTestMode) {
-          console.log(`[E2E_NAV_PROVIDER] unsubscribed=true totalSamples=${sampleCounterRef.current}`);
-        }
-      }
+      subscription?.remove();
+      speechQueueRef.current?.invalidate();
       void Speech.stop();
+      if (isTestMode) console.log(`[E2E_NAV_PROVIDER] unsubscribed=true totalSamples=${sampleCounterRef.current}`);
     };
-  }, [navigating, track, voiceEnabled, isTestMode]);
+  }, [navigating, navigationRide, dispatchNavigation, isTestMode]);
 
-  useEffect(() => {
-    if (!navigating) return;
-    const instruction = poorGps
-      ? "Move to an open area."
-      : offRoute
-      ? "Return to the route line. Automatic rerouting isn't available yet."
-      : fix?.arrived
-      ? "You reached the end of the route."
-      : fix?.next?.maneuver.instruction ?? (track?.maneuvers.length ? "Continue to finish" : "No turn directions saved with this route.");
-    const distanceText = poorGps
-      ? "Waiting for accurate GPS"
-      : offRoute
-      ? "Off route"
-      : fix?.arrived
-      ? "Arrived"
-      : !fix
-      ? "Locating…"
-      : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters);
-    if (isTestMode) {
-      console.log(`[E2E_NAV_STAGE] instruction="${instruction}" distance="${distanceText}" arrived=${Boolean(fix?.arrived)} offRoute=${Boolean(offRoute)}`);
+  const repeatInstruction = useCallback(() => dispatchNavigation({ type: "repeat_instruction", timestamp: Date.now() }), [dispatchNavigation]);
+  const togglePauseNavigation = useCallback(() => {
+    const lifecycle = navigationStateRef.current?.lifecycle;
+    if (lifecycle === "active") dispatchNavigation({ type: "pause", timestamp: Date.now() });
+    else if (lifecycle === "paused") dispatchNavigation({ type: "resume", timestamp: Date.now() });
+  }, [dispatchNavigation]);
+
+  const previewOriginal = useCallback(() => {
+    if (!route || !route.originalDocument || route.recoveryAvailable || !preparationController.canChangeSelection()) return;
+    if (route.previewingOriginal) {
+      void getLocalStorage().storage.getRoute(route.id).then((saved) => {
+        if (preparationController.canChangeSelection() && routeRef.current?.id === route.id) setRoute(displayLocalRoute(saved));
+      }).catch((cause) => setError(cause instanceof Error ? cause.message : "Could not reopen prepared directions."));
+    } else {
+      const original = route.originalDocument;
+      const distanceMeters = original.summary?.distanceMeters ?? original.segments.reduce((sum, segment) => sum + polylineDistance(segment.points), 0);
+      setRoute({ ...route, document: original, distanceMeters, previewingOriginal: true });
     }
-  }, [isTestMode, navigating, poorGps, offRoute, fix, track]);
+  }, [route, preparationController]);
 
-  const backToLibrary = () => { stopNavigation(); setRoute(null); setViewMode("routes"); };
+  const revertPreparation = useCallback(async () => {
+    if (!route || route.kind !== "local" || !preparationController.canChangeSelection()) return;
+    try {
+      const { storage } = getLocalStorage();
+      const current = await storage.getOriginalRoute(route.id);
+      if (!preparationController.canChangeSelection() || routeRef.current?.id !== route.id) return;
+      const reverted = await storage.revertPreparation(route.id, buildSourceIdentityToken(current.record));
+      setRoute(displayLocalRoute(reverted));
+      await refreshLocalRoutes();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not recover the original GPX.");
+    }
+  }, [route, refreshLocalRoutes, preparationController]);
+
+  const backToLibrary = () => {
+    if (!preparationController.canChangeSelection()) return;
+    stopNavigation(); setRoute(null); setViewMode("routes");
+  };
 
   return (
     <SafeAreaProvider>
@@ -466,18 +573,19 @@ export default function App() {
           </View>
         )}
 
-        {route && navigating ? (
+        {route && navigating && navigationRide && navigationState ? (
           <>
             <KeepScreenAwake />
             <ActiveNavigationScreen
               route={route}
-              track={track}
-              fix={fix}
-              offRoute={offRoute}
-              poorGps={poorGps}
+              ride={navigationRide}
+              state={navigationState}
+              engineError={navigationError}
               voiceEnabled={voiceEnabled}
               position={position}
               onToggleVoice={() => setVoiceEnabled((value) => !value)}
+              onRepeatInstruction={repeatInstruction}
+              onTogglePause={togglePauseNavigation}
               onEndNavigation={stopNavigation}
               isTestMode={isTestMode}
             />
@@ -516,6 +624,16 @@ export default function App() {
             onImportGpx={() => void handleImportGpx()}
             onBackToHome={backToLibrary}
             onStartNavigation={() => void startNavigation()}
+            preparationState={preparationState}
+            selectionLocked={!preparationController.canChangeSelection()}
+            onPrepareDirections={() => void preparationController.prepare(false)}
+            onCancelPreparation={() => preparationController.cancel()}
+            onRetryPreparation={() => void preparationController.retry()}
+            onChooseSparseInference={() => void preparationController.prepare(true)}
+            onAcceptPreparation={(partial) => { if (!busy) void preparationController.accept(partial); }}
+            onFocusPreparationWarning={() => {}}
+            onPreviewOriginal={previewOriginal}
+            onRevertPreparation={() => void revertPreparation()}
             onRenameRide={renameRide}
             onDeleteRide={deleteRide}
             onRefreshPublicRoutes={() => void refresh()}

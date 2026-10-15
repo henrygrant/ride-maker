@@ -2,32 +2,35 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BackHandler, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { Camera, GeoJSONSource, Layer, Map, type CameraRef } from "@maplibre/maplibre-react-native";
 import * as Location from "expo-location";
-import { formatDistance, type NavigationFix, type NavigationTrack } from "../navigation";
+import { formatDistance } from "../navigation";
+import type { NavigationState, PreparedNavigationRide } from "@ride-maker/navigation";
 import { routeGeometry } from "../route-view";
 import type { DisplayRoute } from "../types";
 
 export interface ActiveNavigationScreenProps {
   route: DisplayRoute;
-  track: NavigationTrack | null;
-  fix: NavigationFix | null;
-  offRoute: boolean;
-  poorGps: boolean;
+  ride: PreparedNavigationRide;
+  state: NavigationState;
+  engineError: string | null;
   voiceEnabled: boolean;
   position: Location.LocationObjectCoords | null;
   onToggleVoice: () => void;
+  onRepeatInstruction: () => void;
+  onTogglePause: () => void;
   onEndNavigation: () => void;
   isTestMode?: boolean;
 }
 
 export function ActiveNavigationScreen({
   route,
-  track,
-  fix,
-  offRoute,
-  poorGps,
+  ride,
+  state,
+  engineError,
   voiceEnabled,
   position,
   onToggleVoice,
+  onRepeatInstruction,
+  onTogglePause,
   onEndNavigation,
   isTestMode = false,
 }: ActiveNavigationScreenProps) {
@@ -36,24 +39,39 @@ export function ActiveNavigationScreen({
 
   const geometry = useMemo(() => routeGeometry(route.document), [route.document]);
 
-  const instruction = poorGps
+  const maneuver = state.nextManeuverIndex === null ? null : ride.maneuvers[state.nextManeuverIndex] ?? null;
+  const offRoute = state.isOffRoute;
+  const poorGps = state.quality !== "good";
+  const guidanceUnavailable = ride.guidanceUnavailableSegmentIndices.includes(state.currentSegmentIndex);
+  const partial = route.preparationMetadata?.status === "partial";
+  const partialWarning = partial ? route.preparationMetadata?.warnings.find((warning) => warning.code === "unmatched_section" || warning.code === "discontinuity")?.message ?? "Some sections have no turn guidance." : null;
+  const instruction = engineError
+    ? "Guidance is temporarily unavailable."
+    : state.lifecycle === "paused"
+    ? "Navigation paused."
+    : poorGps
     ? "Move to an open area."
     : offRoute
     ? "Return to the route line. Automatic rerouting isn't available yet."
-    : fix?.arrived
+    : guidanceUnavailable
+    ? "Turn guidance is unavailable for this section."
+    : state.arrived
     ? "You reached the end of the route."
-    : fix?.next?.maneuver.instruction ??
-      (track?.maneuvers.length ? "Continue to finish" : "No turn directions saved with this route.");
+    : maneuver?.instruction ?? "Continue to finish";
 
-  const distanceText = poorGps
+  const distanceText = engineError
+    ? "Guidance unavailable"
+    : state.lifecycle === "paused"
+    ? "Paused"
+    : poorGps
     ? "Waiting for accurate GPS"
     : offRoute
     ? "Off route"
-    : fix?.arrived
+    : state.arrived
     ? "Arrived"
-    : !fix
+    : !state.lastAcceptedFix
     ? "Locating…"
-    : formatDistance(fix.distanceToNextMeters ?? fix.remainingMeters);
+    : formatDistance(state.distanceToNextManeuverMeters ?? state.remainingMeters);
 
   // Active navigation mount/unmount tracking
   useEffect(() => {
@@ -81,11 +99,11 @@ export function ActiveNavigationScreen({
     if (isTestMode) {
       console.log(
         `[E2E_NAV_STAGE] instruction="${instruction}" distance="${distanceText}" arrived=${Boolean(
-          fix?.arrived,
+          state.arrived,
         )} offRoute=${Boolean(offRoute)}`,
       );
     }
-  }, [isTestMode, instruction, distanceText, fix?.arrived, offRoute]);
+  }, [isTestMode, instruction, distanceText, state.arrived, offRoute]);
 
   // Hardware Back press handling
   useEffect(() => {
@@ -141,9 +159,12 @@ export function ActiveNavigationScreen({
       <View testID="view-guidance" style={styles.guidance}>
         <Text testID="text-guidance-distance" style={styles.guidanceDistance}>{distanceText}</Text>
         <Text testID="text-guidance-instruction" style={styles.guidanceInstruction}>{instruction}</Text>
-        {fix && !offRoute && !poorGps && (
+        {engineError && <Text style={styles.warningText}>{engineError}</Text>}
+        {partialWarning && <Text accessibilityRole="alert" style={styles.warningText}>Partial directions: {partialWarning}</Text>}
+        {guidanceUnavailable && <Text accessibilityRole="alert" style={styles.warningText}>No turn instructions are available on this segment.</Text>}
+        {state.lastAcceptedFix && !offRoute && !poorGps && (
           <Text style={styles.guidanceRemaining}>
-            {formatDistance(fix.remainingMeters)} remaining
+            {formatDistance(state.remainingMeters)} remaining
           </Text>
         )}
       </View>
@@ -180,6 +201,12 @@ export function ActiveNavigationScreen({
       </View>
 
       <View style={styles.navigationBar}>
+        <Pressable testID="button-navigation-repeat" accessibilityRole="button" accessibilityLabel="Repeat instruction" onPress={onRepeatInstruction} style={styles.voiceButton}>
+          <Text style={styles.actionText}>Repeat</Text>
+        </Pressable>
+        <Pressable testID="button-navigation-pause" accessibilityRole="button" accessibilityLabel={state.lifecycle === "paused" ? "Resume navigation" : "Pause navigation"} onPress={onTogglePause} style={styles.voiceButton}>
+          <Text style={styles.actionText}>{state.lifecycle === "paused" ? "Resume" : "Pause"}</Text>
+        </Pressable>
         <Pressable
           testID="button-voice-toggle"
           accessibilityRole="button"
@@ -276,6 +303,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
+  warningText: { color: "#ffe0a8", fontSize: 12, lineHeight: 17, marginTop: 6 },
   mapContainer: {
     flex: 1,
   },

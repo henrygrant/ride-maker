@@ -24,6 +24,9 @@ import { routeGeometry } from "../route-view";
 import { MapHomeDock } from "../components/MapHomeDock";
 import { MyRidesDrawer } from "../components/MyRidesDrawer";
 import { SelectedRideDock } from "../components/SelectedRideDock";
+import { PreparationReviewDock } from "../components/PreparationReviewDock";
+import type { PreparationState } from "../controllers/prepare-ride-controller";
+import type { LocationBearingWarning } from "@ride-maker/routing";
 
 export type MainMapScreenProps = {
   route: DisplayRoute | null;
@@ -38,6 +41,16 @@ export type MainMapScreenProps = {
   onImportGpx: () => void;
   onBackToHome: () => void;
   onStartNavigation: () => void;
+  preparationState: PreparationState;
+  selectionLocked: boolean;
+  onPrepareDirections: () => void;
+  onCancelPreparation: () => void;
+  onRetryPreparation: () => void;
+  onChooseSparseInference: () => void;
+  onAcceptPreparation: (partial: boolean) => void;
+  onFocusPreparationWarning: (warning: LocationBearingWarning) => void;
+  onPreviewOriginal: () => void;
+  onRevertPreparation: () => void;
   onRenameRide: (newName: string) => Promise<void>;
   onDeleteRide: () => Promise<void>;
   onRefreshPublicRoutes: () => void;
@@ -61,6 +74,16 @@ export function MainMapScreen({
   onImportGpx,
   onBackToHome,
   onStartNavigation,
+  preparationState,
+  selectionLocked,
+  onPrepareDirections,
+  onCancelPreparation,
+  onRetryPreparation,
+  onChooseSparseInference,
+  onAcceptPreparation,
+  onFocusPreparationWarning,
+  onPreviewOriginal,
+  onRevertPreparation,
   onRenameRide,
   onDeleteRide,
   onRefreshPublicRoutes,
@@ -91,6 +114,17 @@ export function MainMapScreen({
   const geometry = useMemo(() => {
     return route ? routeGeometry(route.document) : null;
   }, [route?.document]);
+  const preparationOriginal = preparationState.status === "choice" || preparationState.status === "review"
+    ? routeGeometry(preparationState.original) : null;
+  const preparationCandidate = preparationState.status === "review"
+    ? routeGeometry(preparationState.result.document) : null;
+  const fitBounds = useMemo(() => {
+    const bounds = [geometry?.bounds, preparationOriginal?.bounds, preparationCandidate?.bounds].filter((item): item is [number, number, number, number] => item !== null && item !== undefined);
+    if (bounds.length === 0) return null;
+    return bounds.slice(1).reduce<[number, number, number, number]>((all, next) => [
+      Math.min(all[0], next[0]), Math.min(all[1], next[1]), Math.max(all[2], next[2]), Math.max(all[3], next[3]),
+    ], bounds[0]!);
+  }, [geometry?.bounds, preparationOriginal?.bounds, preparationCandidate?.bounds]);
 
   // Extract start and finish coordinates if available
   const startCoord: [number, number] | null =
@@ -114,17 +148,21 @@ export function MainMapScreen({
     }
   }, [route?.id]);
 
+  useEffect(() => {
+    if (selectionLocked) setIsLibraryOpen(false);
+  }, [selectionLocked]);
+
   // Fit camera bounds ONLY when actual route geometry changes (not on UI toggles, rename, drawer open, or ordinary pan)
   const routeGeometryKey = route
-    ? `${route.id}:${route.document.segments.map((s) => s.points.length).join(",")}`
+    ? `${route.id}:${route.document.segments.map((s) => s.points.length).join(",")}:${preparationState.status}:${preparationState.status === "review" ? preparationState.result.document.id : ""}:${route.previewingOriginal ? "original" : "active"}`
     : null;
 
   useEffect(() => {
-    if (route && geometry?.bounds) {
+    if (route && fitBounds) {
       if (lastFittedGeometryKeyRef.current !== routeGeometryKey) {
         lastFittedGeometryKeyRef.current = routeGeometryKey;
         const bottomPadding = Math.max(dockHeight, 220) + insets.bottom + 20;
-        cameraRef.current?.fitBounds(geometry.bounds, {
+        cameraRef.current?.fitBounds(fitBounds, {
           padding: {
             top: insets.top + 70,
             right: 40,
@@ -137,7 +175,7 @@ export function MainMapScreen({
     } else {
       lastFittedGeometryKeyRef.current = null;
     }
-  }, [route?.id, routeGeometryKey, geometry?.bounds, dockHeight, insets.top, insets.bottom]);
+  }, [route?.id, routeGeometryKey, fitBounds, dockHeight, insets.top, insets.bottom]);
 
   // Back handler hierarchy: drawer first, then clear selected route to map home
   useEffect(() => {
@@ -206,7 +244,7 @@ export function MainMapScreen({
         />
 
         {/* Selected route geometry: MultiLineString */}
-        {geometry && (
+        {geometry && !preparationOriginal && (
           <GeoJSONSource id="selected-route-source" data={geometry.shape}>
             <Layer
               id="selected-route-casing"
@@ -218,6 +256,17 @@ export function MainMapScreen({
               type="line"
               paint={{ "line-color": "#1e8068", "line-width": 5 }}
             />
+          </GeoJSONSource>
+        )}
+
+        {preparationOriginal && (
+          <GeoJSONSource id="preparation-original-source" data={preparationOriginal.shape}>
+            <Layer id="preparation-original-line" type="line" paint={{ "line-color": "#1684a0", "line-width": 4, "line-dasharray": [2, 2] }} />
+          </GeoJSONSource>
+        )}
+        {preparationCandidate && (
+          <GeoJSONSource id="preparation-candidate-source" data={preparationCandidate.shape}>
+            <Layer id="preparation-candidate-line" type="line" paint={{ "line-color": "#e24d35", "line-width": 5 }} />
           </GeoJSONSource>
         )}
 
@@ -263,7 +312,8 @@ export function MainMapScreen({
             testID="button-back"
             accessibilityRole="button"
             accessibilityLabel="Back to map home"
-            onPress={onBackToHome}
+            onPress={() => { if (!selectionLocked) onBackToHome(); }}
+            disabled={selectionLocked}
             style={styles.backCircleButton}
           >
             <Text style={styles.backCircleIcon}>‹</Text>
@@ -292,7 +342,7 @@ export function MainMapScreen({
           )}
 
           {/* Diagnostics Link */}
-          {showDiagnostics && onOpenDiagnostics && (
+          {showDiagnostics && onOpenDiagnostics && !selectionLocked && (
             <Pressable
               testID="button-diagnostics-toggle"
               accessibilityRole="button"
@@ -309,7 +359,8 @@ export function MainMapScreen({
             testID="home-open-myrides"
             accessibilityRole="button"
             accessibilityLabel="My rides"
-            onPress={() => setIsLibraryOpen((v) => !v)}
+            onPress={() => { if (!selectionLocked) setIsLibraryOpen((v) => !v); }}
+            disabled={selectionLocked}
             style={styles.myRidesPill}
           >
             <Text style={styles.myRidesIcon}>≡</Text>
@@ -353,18 +404,33 @@ export function MainMapScreen({
       )}
 
       {/* Bottom Surfaces: Selected Ride Dock or Map Home Dock */}
-      {route ? (
+      {route && preparationState.status === "idle" ? (
         <SelectedRideDock
           key={route.id}
           route={route}
           onOpenLibrary={() => setIsLibraryOpen(true)}
           onStartNavigation={onStartNavigation}
+          onPrepareDirections={onPrepareDirections}
+          onPreviewOriginal={onPreviewOriginal}
+          onRevertPreparation={onRevertPreparation}
           onRenameRide={onRenameRide}
           onDeleteRide={onDeleteRide}
           bottomInset={insets.bottom}
           onLayout={(e) => {
             const h = e.nativeEvent.layout.height;
             if (h > 0) setDockHeight(h);
+          }}
+        />
+      ) : route ? (
+        <PreparationReviewDock
+          state={preparationState}
+          onCancel={onCancelPreparation}
+          onRetry={onRetryPreparation}
+          onChooseSparseInference={onChooseSparseInference}
+          onAccept={onAcceptPreparation}
+          onFocusWarning={(warning) => {
+            onFocusPreparationWarning(warning);
+            cameraRef.current?.easeTo({ center: [warning.coordinate.longitude, warning.coordinate.latitude], zoom: 15, duration: 350 });
           }}
         />
       ) : (
@@ -381,7 +447,7 @@ export function MainMapScreen({
 
       {/* Slide-over Library Drawer */}
       <MyRidesDrawer
-        visible={isLibraryOpen}
+        visible={isLibraryOpen && !selectionLocked}
         localRoutes={localRoutes}
         publicRoutes={publicRoutes}
         input={input}

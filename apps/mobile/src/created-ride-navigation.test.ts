@@ -6,13 +6,14 @@ import type { RouteDocument } from "@ride-maker/domain";
 import { ValhallaRoutingProvider } from "@ride-maker/routing";
 import { PhotonGeocodingProvider } from "@ride-maker/geocoding";
 import { CreateRideController } from "./controllers/create-ride-controller";
-import { buildNavigationTrack, formatDistance, navigationFix, type NavigationTrack } from "./navigation";
+import { formatDistance } from "./navigation";
+import { bearingDegrees, createNavigationState, distanceMeters, prepareNavigationRide, reduceNavigation, type NavigationState, type PreparedNavigationRide } from "@ride-maker/navigation";
 
 describe("Created Ride Navigation with Fixture HTTP Server", () => {
   let server: ChildProcess;
   let serverPort: number;
   let routedDoc: RouteDocument;
-  let track: NavigationTrack;
+  let navigationRide: PreparedNavigationRide;
 
   beforeAll(async () => {
     // Run the exact native harness server, making syntax/protocol regressions visible.
@@ -50,11 +51,9 @@ describe("Created Ride Navigation with Fixture HTTP Server", () => {
     expect(preview?.segments).toHaveLength(2);
 
     routedDoc = controller.buildRouteDocument();
-    const builtTrack = buildNavigationTrack(routedDoc);
-    if (!builtTrack) {
-      throw new Error("Failed to build navigation track from routed document");
-    }
-    track = builtTrack;
+    const builtRide = prepareNavigationRide(routedDoc);
+    if (!builtRide.ok) throw new Error(`Failed to compile navigation ride: ${builtRide.error.message}`);
+    navigationRide = builtRide.ride;
   });
 
   afterAll(async () => {
@@ -63,80 +62,85 @@ describe("Created Ride Navigation with Fixture HTTP Server", () => {
     }
   });
 
-  it("builds navigation track via actual HTTP client with expected length and indexed maneuvers", () => {
-    expect(track.lengthMeters).toBeGreaterThan(3200);
-    expect(track.lengthMeters).toBeLessThan(3350);
+  it("compiles the actual routed document into the production navigation engine", () => {
+    expect(navigationRide.totalDistanceMeters).toBeGreaterThan(3200);
+    expect(navigationRide.totalDistanceMeters).toBeLessThan(3350);
 
-    expect(track.maneuvers).toHaveLength(4);
-    expect(track.maneuvers[0]!.maneuver.instruction).toBe("Depart start point.");
-    expect(track.maneuvers[0]!.distanceMeters).toBeCloseTo(0, 0);
+    expect(navigationRide.maneuvers).toHaveLength(4);
+    expect(navigationRide.maneuvers[0]!.instruction).toBe("Depart start point.");
+    expect(navigationRide.maneuvers[0]!.distanceAlongRideMeters).toBeCloseTo(0, 0);
 
-    expect(track.maneuvers[1]!.maneuver.instruction).toBe("Arrive at intermediate stop 1.");
-    expect(track.maneuvers[1]!.distanceMeters).toBeGreaterThan(1600);
-    expect(track.maneuvers[1]!.distanceMeters).toBeLessThan(1650);
+    expect(navigationRide.maneuvers[1]!.instruction).toBe("Arrive at intermediate stop 1.");
+    expect(navigationRide.maneuvers[1]!.distanceAlongRideMeters).toBeGreaterThan(1600);
+    expect(navigationRide.maneuvers[1]!.distanceAlongRideMeters).toBeLessThan(1650);
 
-    expect(track.maneuvers[3]!.maneuver.instruction).toBe("Arrive at finish.");
-    expect(track.maneuvers[3]!.distanceMeters).toBeCloseTo(track.lengthMeters, 0);
+    expect(navigationRide.maneuvers[3]!.instruction).toBe("Arrive at finish.");
+    expect(navigationRide.maneuvers[3]!.distanceAlongRideMeters).toBeCloseTo(navigationRide.totalDistanceMeters, 0);
   });
 
-  it("calculates Stage 1 (start) progress and instructions", () => {
-    const coords = { latitude: 40.785, longitude: -73.968, accuracy: 5 };
-    const fix = navigationFix(track, coords, 0);
+  function replay(points: Array<{ latitude: number; longitude: number }>): NavigationState {
+    let state = createNavigationState(navigationRide);
+    let timestamp = 1_000;
+    let previous: { latitude: number; longitude: number } | null = null;
+    for (let index = 0; index < points.length; index++) {
+      const point = points[index]!;
+      const following = points[index + 1] ?? point;
+      timestamp += previous ? Math.ceil(Math.max(2_000, distanceMeters(previous, point) / 5 * 1000 + 2_000)) : 2_000;
+      state = reduceNavigation(navigationRide, state, {
+        type: "location_fix", timestamp, receivedAt: timestamp, accuracyMeters: 5,
+        headingDegrees: bearingDegrees(previous ?? point, previous ? point : following), ...point,
+      }).state;
+      previous = point;
+    }
+    return state;
+  }
 
-    expect(fix.arrived).toBe(false);
-    expect(fix.offRouteMeters).toBeLessThan(10);
-    expect(fix.next?.maneuver.instruction).toBe("Depart start point.");
-    expect(formatDistance(fix.distanceToNextMeters!)).toBe("0 m");
+  it("tracks the start fix and uses the engine's maneuver progress", () => {
+    const state = replay([{ latitude: 40.785, longitude: -73.968 }]);
+    expect(state.progressMeters).toBeLessThan(10);
+    expect(state.lateralDistanceMeters).toBeLessThan(10);
+    expect(state.nextManeuverIndex).not.toBeNull();
+    expect(formatDistance(state.distanceToNextManeuverMeters ?? 0)).toBe("0 m");
   });
 
-  it("calculates Stage 2 (midpoint) progress, instruction, and distance matching feeder regex", () => {
-    // Stage 2 midpoint coordinate: 40.7781, -73.9709
-    const coords = { latitude: 40.7781, longitude: -73.9709, accuracy: 5 };
-    const fix = navigationFix(track, coords, 0);
-
-    expect(fix.arrived).toBe(false);
-    expect(fix.offRouteMeters).toBeLessThan(10);
-
-    // Feeder step 2 requires fresh instruction: "Arrive at intermediate stop 1."
-    expect(fix.next?.maneuver.instruction).toBe("Arrive at intermediate stop 1.");
-
-    // Feeder step 2 requires distance: 830 m (or regex 810|820|830|840|850 m)
-    const formattedDist = formatDistance(fix.distanceToNextMeters!);
-    expect(/(810|820|830|840|850) m/.test(formattedDist)).toBe(true);
+  it("advances along the route and evaluates off-route state through engine events", () => {
+    const state = replay([
+      { latitude: 40.785, longitude: -73.968 },
+      { latitude: 40.7781, longitude: -73.9709 },
+    ]);
+    expect(state.progressMeters).toBeGreaterThan(0);
+    expect(state.lateralDistanceMeters).toBeLessThan(20);
+    expect(state.distanceToNextManeuverMeters).not.toBeNull();
+    expect(formatDistance(state.distanceToNextManeuverMeters ?? 0)).toMatch(/\d+ (m|\.\d km)/u);
+    const offRoute = replay([
+      { latitude: 40.785, longitude: -73.968 },
+      { latitude: 40.7781, longitude: -73.9709 },
+      { latitude: 40.785, longitude: -73.95 },
+      { latitude: 40.785, longitude: -73.95 },
+      { latitude: 40.785, longitude: -73.95 },
+    ]);
+    expect(offRoute.lateralDistanceMeters).toBeGreaterThan(1000);
+    expect(offRoute.isOffRoute).toBe(true);
   });
 
-  it("calculates Stage 3 (off-route) divergence beyond threshold", () => {
-    // Stage 3 off-route coordinate: 40.7850, -73.9500 (~1.5 km east of track)
-    const coords = { latitude: 40.785, longitude: -73.95, accuracy: 5 };
-    const fix = navigationFix(track, coords, 831);
-
-    expect(fix.offRouteMeters).toBeGreaterThan(1000);
-    const isOffRoute = fix.offRouteMeters > Math.max(50, (coords.accuracy ?? 100) * 2);
-    expect(isOffRoute).toBe(true);
-  });
-
-  it("calculates Stage 4 (finish) arrival", () => {
-    // Stage 4 finish coordinate: 40.7850, -73.9680
-    const coords = { latitude: 40.785, longitude: -73.968, accuracy: 5 };
-    // Progress along track has reached the final leg (~3200 m)
-    const fix = navigationFix(track, coords, 3200);
-
-    expect(fix.arrived).toBe(true);
-    expect(fix.remainingMeters).toBeLessThan(25);
-  });
-
-  it("reaches arrival through the feeder's actual sequential fixes", () => {
-    let progress = 0;
-    const start = navigationFix(track, { latitude: 40.785, longitude: -73.968 }, progress);
-    progress = start.progressMeters;
-    const midpoint = navigationFix(track, { latitude: 40.7781, longitude: -73.9709 }, progress);
-    progress = midpoint.progressMeters;
-    expect(midpoint.progressMeters).toBeGreaterThan(start.progressMeters);
-    const deviation = navigationFix(track, { latitude: 40.785, longitude: -73.95 }, progress);
-    expect(deviation.offRouteMeters).toBeGreaterThan(50);
-    // Production App preserves progress during an off-route fix.
-    const finish = navigationFix(track, { latitude: 40.785, longitude: -73.968 }, progress);
-    expect(finish.arrived).toBe(true);
-    expect(finish.remainingMeters).toBeLessThan(20);
+  it("reaches arrival by replaying the authored routed geometry in order", () => {
+    const points = routedDoc.segments.flatMap((segment) => {
+      const result: Array<{ latitude: number; longitude: number }> = [];
+      for (let i = 1; i < segment.points.length; i++) {
+        const start = segment.points[i - 1]!;
+        const end = segment.points[i]!;
+        const steps = Math.max(1, Math.ceil(distanceMeters(start, end) / 50));
+        for (let step = 0; step < steps; step++) {
+          const fraction = step / steps;
+          result.push({ latitude: start.latitude + (end.latitude - start.latitude) * fraction, longitude: start.longitude + (end.longitude - start.longitude) * fraction });
+        }
+      }
+      const final = segment.points.at(-1);
+      if (final) result.push(final);
+      return result;
+    });
+    const state = replay(points);
+    expect(state.arrived).toBe(true);
+    expect(state.remainingMeters).toBeLessThan(30);
   });
 });

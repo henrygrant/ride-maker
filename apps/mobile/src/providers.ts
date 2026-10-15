@@ -1,4 +1,4 @@
-import { ValhallaRoutingProvider, type RoutingProvider } from "@ride-maker/routing";
+import { ValhallaRoutingProvider, ValhallaTraceMatchingProvider, type RoutingProvider, type TraceMatchingProvider } from "@ride-maker/routing";
 import { PhotonGeocodingProvider, type GeocodingProvider } from "@ride-maker/geocoding";
 
 /**
@@ -49,4 +49,17 @@ export function createDefaultGeocodingProvider(): GeocodingProvider {
   }
 
   return new PhotonGeocodingProvider();
+}
+
+/** Explicit trace service override; the public default is for low-volume development only. */
+export function createDefaultTraceMatchingProvider(): TraceMatchingProvider {
+  if (process.env.EXPO_PUBLIC_TRACE_MATCHING_URL) {
+    return new ValhallaTraceMatchingProvider(process.env.EXPO_PUBLIC_TRACE_MATCHING_URL);
+  }
+  const isTestMode = process.env.EXPO_PUBLIC_TEST_MODE === "true";
+  if (isTestMode && process.env.EXPO_PUBLIC_API_URL) {
+    const baseUrl = process.env.EXPO_PUBLIC_API_URL.replace(/\/api\/?$/, "");
+    return new ValhallaTraceMatchingProvider(`${baseUrl}/trace_route`);
+  }
+  return new ValhallaTraceMatchingProvider();
 }
