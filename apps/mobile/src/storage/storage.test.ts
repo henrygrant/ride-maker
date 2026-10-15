@@ -132,6 +132,7 @@ describe("LocalRouteStorage & GpxImportService", () => {
         throw new Error("Simulated SQLite write error");
       },
       updateRouteName: async () => {},
+      commitActivePreparation: async () => {},
       listRoutes: async () => [],
       getRoute: async () => null,
       deleteRoute: async () => {},

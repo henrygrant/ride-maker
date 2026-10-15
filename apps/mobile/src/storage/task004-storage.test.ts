@@ -430,6 +430,7 @@ describe("Task004 Storage Contracts", () => {
       listRoutes: db.listRoutes.bind(db),
       insertRoute: db.insertRoute.bind(db),
       updateRouteName: db.updateRouteName.bind(db),
+      commitActivePreparation: db.commitActivePreparation.bind(db),
       close: db.close.bind(db),
       deleteRoute: async () => {
         throw new Error("DB delete failed");

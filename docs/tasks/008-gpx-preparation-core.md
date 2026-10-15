@@ -1,11 +1,54 @@
 # Task008: GPX preparation core and Valhalla trace adapter
 
-Status: interrupted by Gemini's usage quota; partial implementation is not
-accepted. Three independent readiness probes fail; see
-[initial Sol review](../reviews/007-009-sol-initial-review.md). Gemini implements;
-Sol reviews. This bounded
+Status: pure preparation/storage boundary accepted by Sol; native transport and
+mobile workflow acceptance remain pending. See
+[core acceptance](../reviews/008-009-sol-core-acceptance.md). The original Gemini
+handoff was incomplete and three independent readiness probes failed; see
+[initial Sol review](../reviews/007-009-sol-initial-review.md). This bounded
 pure-code task can run alongside Task007 because it owns a disjoint package and
 does not touch root lockfiles, app/native files or the engine package.
+
+## Luna implementation update (2026-10-14)
+
+The routing preparation core and Valhalla `trace_route` adapter are implemented
+in `packages/routing/src/preparation/` and exported from the routing package.
+The provider-independent readiness probes now reject reversed paths, absent
+instructions, and malformed maneuver references. Runtime input/provider checks,
+finite configuration bounds, request/response caps, cancellation handling,
+chunk failure retention, separate source segments, stable generated identities,
+and conservative source-interval coverage are in place. Exact ordered overlap
+is required to merge chunks; unresolved seams remain disjoint and lower readiness.
+Disconnected provider legs remain separate and create a partial-readiness warning.
+
+Round-two implementation notes (2026-10-14): provider outputs are runtime
+validated and must be assigned to ordered source progress before they contribute
+coverage. Otherwise the original source interval is retained without guidance.
+Required `outputCoverage` metadata maps each output segment to inclusive source
+point and cumulative-distance bounds and records whether validated maneuvers are
+available. Coverage uses the union of those source intervals, so overlapping
+chunks do not double count. Assessment indexes every source/output edge, checks
+every supplied vertex, and interpolates at most 5m apart; its reported 2.5m
+sampling error budget is included conservatively in readiness. Work and request
+limits fail explicitly instead of truncating or claiming readiness. Prepared
+documents retain the source route ID; storage owns its immutable preparation
+version identity.
+
+Verification performed:
+
+- `npm run check --workspace=@ride-maker/routing` — passed.
+- `npm run test --workspace=@ride-maker/routing` — passed, 44 tests in 6 files.
+- Authored regressions cover malformed/reversed outputs, a short localized
+  detour, reversed closed loops, reordered repeated passes, a failed middle
+  chunk, unavailable output correspondence, and bounded 100,000-point geometry.
+- A one-off three-point synthetic trace against the documented development
+  Valhalla endpoint passed through the actual adapter; no personal GPX was used.
+
+Known review gates: network-snapped chunk overlaps without a provable seam are
+kept as separate source-clipped portions and require review; no speculative seam
+is invented. The adapter's React Native non-streaming response fallback can
+enforce the byte cap only after `text()` buffers the body; streaming runtimes
+enforce it while reading. Native transport and storage/mobile integration remain
+separate review gates.
 
 ## Scope and API responsibilities
 
