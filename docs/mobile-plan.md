@@ -1,8 +1,8 @@
 # Ride Maker mobile plan
 
-Status: phone-first extension plan; an initial mobile viewer and foreground
-guidance already exist. Functionality first; visual design follows a successful
-real-device navigation test. Sol owns architecture, task contracts, integration,
+Status: phone-first app with local rides, route creation, foreground guidance
+and accepted map-home/floating-dock UI. Prepared GPX navigation, robust engine,
+background field validation and offline map support are the active next phase. Sol owns architecture, task contracts, integration,
 and review. Gemini implements individual task briefs using the selected delegated model. Use T3 delegated
 tasks for Gemini implementation and review rounds; keep task contracts and
 evidence in this repository.
@@ -211,11 +211,18 @@ task at a time with owned files, interfaces, acceptance checks, and escalation
 conditions. Gemini reports files changed, commands run, failures, and unresolved
 issues. Sol reviews the diff and results before accepting a milestone.
 
-Task003 is accepted. Current implementation task: [task004](tasks/004-mobile-ride-creation.md).
-Prepared-ride/navigation-engine contracts will be a subsequent bounded task. Do not independently change
-architecture, schema versions, routing semantics, or production deployment.
-Escalate incompatibilities with evidence rather than installing unrelated
-libraries or repeatedly retrying a failing approach.
+Tasks003–005 are accepted for their recorded Android emulator scopes. Task006
+map home is accepted as a focused UI pass; its full updated regression suite has
+not been accepted. Current implementation task:
+[task007](tasks/007-navigation-engine.md), the prepared-ride boundary and pure
+navigation engine. Next: GPX matching/review and original-preserving prepared
+storage, app engine integration, background session readiness, and offline map
+packs. Sol reviews each bounded Gemini implementation and continues without
+routine owner check-ins. Only physical riding evidence requires owner action.
+Use focused verification suited to each change; avoid stale-data retry loops.
+Architecture/schema/deployment decisions remain reviewed by Sol before Gemini
+implements them. Production matching and tile coverage/provider choices require
+resource, terms and operational assessment before deployment.
 
 ## Primary references
 

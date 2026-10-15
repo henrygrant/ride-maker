@@ -11,8 +11,8 @@ foreground guidance for routes with saved directions.
 - `packages/ui` — shared React Strict DOM components and design tokens
 - `packages/domain` and `packages/persistence` — shared route format and PocketBase access
 
-The phone opens **My rides**, with **Create ride** as the primary action and
-**Import GPX** as a secondary option. Creation features an immersive full-screen
+The phone opens **Map home**, with a floating **My rides** drawer, **Create ride**
+as the primary action and **Import GPX** as a secondary option. Creation features an immersive full-screen
 MapLibre map with a Floating Dock (Concept A), supporting direct route previews,
 debounced geocoding search with error recovery, center-pin map placement, up to 8
 reorderable/removable stops with multi-step undo, loop toggle, and blank-name save
